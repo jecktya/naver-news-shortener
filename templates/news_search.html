@@ -12,18 +12,31 @@
         .btn-selected { background:#4287f5; color:#fff;}
         .copytxt { width:100%; min-height:120px; font-size:1.05em; margin-top:10px; }
         .small { font-size:0.95em; color:gray;}
+        .fail-list { color: #d03f3f; font-size:0.98em; margin:10px 0 0 0;}
     </style>
     <script>
-    // 전체 선택/해제, 선택 복사 js
+    // 즉시 textarea 업데이트
+    function updateCopyArea() {
+        let checked = document.querySelectorAll('input[name="selected_urls"]:checked');
+        let results = [];
+        checked.forEach(cb => {
+            let idx = cb.value;
+            let block = document.getElementById('block_' + idx);
+            if (block) results.push(block.innerText.trim() + "\n" + cb.dataset.url + "\n");
+        });
+        document.getElementById("copy_area").value = results.join('\n');
+    }
     function selectAll(val) {
         let cbs = document.querySelectorAll('input[name="selected_urls"]');
-        cbs.forEach(cb => cb.checked = val);
+        cbs.forEach(cb => { cb.checked = val; });
+        updateCopyArea();
     }
     function copyText() {
         let ta = document.getElementById("copy_area");
         ta.select(); document.execCommand("copy");
         alert("복사 완료!");
     }
+    window.onload = function() { updateCopyArea(); }
     </script>
 </head>
 <body>
@@ -54,16 +67,33 @@
         </div>
         {% for art in final_results %}
         <div style="border-bottom:1px solid #eee; padding:7px 0;">
-            <input type="checkbox" name="selected_urls" value="{{ art.url }}" class="checkbox" {% if art.url in selected_urls %}checked{% endif %}>
-            <b>{{ art.title }}</b> ({{ art.press }})<br>
+            <input type="checkbox" name="selected_urls" value="{{ loop.index0 }}" class="checkbox"
+                data-url="{{ art.url }}" {% if art.url in selected_urls %}checked{% endif %}
+                onchange="updateCopyArea()">
+            <b id="block_{{ loop.index0 }}">{{ art.title }}</b> ({{ art.press }})<br>
             <span class="small">🕒 {{ art.pubdate }} | 키워드: {{ art.matched|join(', ') }}</span><br>
             <a href="{{ art.url }}" target="_blank" style="font-size:0.97em; color:#4287f5;">기사 바로보기</a>
         </div>
         {% endfor %}
-        <textarea id="copy_area" class="copytxt" readonly>{% for art in final_results if art.url in selected_urls %}■ {{ art.title }} ({{ art.press }})\n{{ art.url }}\n\n{% endfor %}</textarea>
-        <button type="button" class="btn" onclick="copyText()">📋 선택 복사</button>
-        <button type="submit" class="btn">주소변환(네이버me)</button>
+        <textarea id="copy_area" class="copytxt" readonly></textarea>
+        <div>
+            <button type="button" class="btn" onclick="copyText()">📋 선택 복사</button>
+            <button type="submit" class="btn">주소변환(네이버me)</button>
+        </div>
     </form>
+    {% if failed_urls %}
+        <div class="fail-list">
+            <b>※ 변환 실패 목록:</b>
+            <ul>
+            {% for fail in failed_urls %}
+                <li>{{ fail.title }} ({{ fail.press }})<br>
+                <span style="color:gray">{{ fail.url }}</span><br>
+                <span style="color:#b90000;">실패 사유: {{ fail.reason }}</span>
+                </li>
+            {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
     {% endif %}
 </body>
 </html>
