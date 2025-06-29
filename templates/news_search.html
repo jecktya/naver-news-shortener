@@ -9,7 +9,6 @@
         .msg { color:#4287f5; font-size:1.08em; margin-bottom:10px;}
         .checkbox { margin-right:5px; }
         .btn { font-size:1em; padding:3px 10px; border-radius:4px; border:1px solid #bbb; margin:2px 3px; background:#e7e7ef; cursor:pointer;}
-        .btn-selected { background:#4287f5; color:#fff;}
         .copytxt { width:100%; min-height:120px; font-size:1.05em; margin-top:10px; }
         .small { font-size:0.95em; color:gray;}
         .nowrap {white-space: pre-line;}
@@ -18,7 +17,7 @@
         function selectAll(val) {
             let cbs = document.querySelectorAll('input[name="selected_urls"]');
             cbs.forEach(cb => cb.checked = val);
-            document.getElementById('result_form').submit();
+            updateCopyArea();
         }
         function updateCopyArea() {
             let cbs = document.querySelectorAll('input[name="selected_urls"]');
@@ -33,7 +32,8 @@
         }
         function copyText() {
             let ta = document.getElementById("copy_area");
-            ta.select(); document.execCommand("copy");
+            ta.select();
+            document.execCommand("copy");
             alert("복사 완료!");
         }
     </script>
@@ -75,17 +75,15 @@
                 {% if r.matched_str %}<span class="small">키워드: {{r.matched_str}}</span>{% endif %}
                 <br><a href="{{r.url}}" target="_blank">{{r.url}}</a>
                 </span>
-                <input type="hidden" id="copy_line_{{loop.index0}}" value="■ {{r.title}} ({{r.press}})\n{{r.url}}">
+                <input type="hidden" id="copy_line_{{loop.index0}}" value="■ {{r.title}} ({{r.press}})
+{{r.url}}">
             </li>
             {% endfor %}
         </ul>
-        <textarea name="copy_text" id="copy_area" class="copytxt nowrap" readonly>
-{% for r in final_results %}■ {{r.title}} ({{r.press}})
-{{r.url}}
-{% if not loop.last %}
+        <textarea name="copy_text" id="copy_area" class="copytxt nowrap" readonly>{% for r in final_results %}■ {{r.title}} ({{r.press}})
+{{r.url}}{% if not loop.last %}
 
-{% endif %}{% endfor %}
-        </textarea>
+{% endif %}{% endfor %}</textarea>
         <div>
             <button type="submit" class="btn">🔗 선택 주소 단축</button>
         </div>
@@ -95,4 +93,20 @@
     {% if copy_text and not final_results %}
     <form method="post" action="/shorten">
         <input type="hidden" name="keywords" value="{{default_keywords}}">
-        <input type="hidden" name="checked_two_keywords" value="{{'on' if checked_two_keywords
+        <input type="hidden" name="checked_two_keywords" value="{{'on' if checked_two_keywords else ''}}">
+        <input type="hidden" name="search_mode" value="{{search_mode}}">
+        <input type="hidden" name="copy_text" value="{{copy_text}}">
+        <textarea id="copy_area" class="copytxt nowrap" readonly>{{copy_text}}</textarea>
+        <div>
+            <button type="button" class="btn" onclick="copyText()">📋 복사</button>
+        </div>
+    </form>
+    {% endif %}
+
+    {% if fail_msgs %}
+    <div class="msg" style="color:#b00; white-space:pre-line;">단축주소 변환 실패 목록:<br>
+    {% for f in fail_msgs %}{{f}}
+    {% endfor %}</div>
+    {% endif %}
+</body>
+</html>
