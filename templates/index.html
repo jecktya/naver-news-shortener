@@ -1,24 +1,80 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>네이버 뉴스검색 + 단축주소</title>
+    <meta charset="utf-8">
+    <title>네이버 뉴스검색기 + 단축주소</title>
 </head>
 <body>
-    <h1>네이버 뉴스검색 + 단축주소</h1>
-    <form method="post">
-        <input name="query" value="{{ query or '' }}" required>
-        <button type="submit">검색</button>
-    </form>
-    {% if articles %}
-    <hr>
-    <ul>
-        {% for art in articles %}
-        <li>
-            <b>{{ art.title }}</b><br>
-            <a href="{{ art.url }}" target="_blank">{{ art.url }}</a>
-        </li>
-        {% endfor %}
-    </ul>
-    {% endif %}
+<h1>📰 네이버 뉴스검색기</h1>
+<form method="post">
+    <label>🗂️ 검색 유형 선택</label>
+    <select name="search_mode">
+        <option value="전체" {% if search_mode == "전체" %}selected{% endif %}>전체</option>
+        <option value="동영상만" {% if search_mode == "동영상만" %}selected{% endif %}>동영상만</option>
+        <option value="주요언론사만" {% if search_mode == "주요언론사만" %}selected{% endif %}>주요언론사만</option>
+    </select>
+    <br><br>
+    <label>🔍 키워드 입력 (쉼표로 구분)</label>
+    <input type="text" name="keywords" value="{{ keywords }}" style="width:400px;">
+    <button type="submit">🔍 뉴스 검색</button>
+</form>
+{% if articles %}
+<hr>
+<form id="copyForm">
+<table border="1" cellpadding="5">
+    <tr>
+        <th>선택</th>
+        <th>제목</th>
+        <th>언론사</th>
+        <th>시간</th>
+        <th>주소(단축)</th>
+    </tr>
+    {% for art in articles %}
+    <tr>
+        <td><input type="checkbox" name="select_article" value="{{ art.short_url }}"></td>
+        <td>{{ art.title }}</td>
+        <td>{{ art.press }}</td>
+        <td>{{ art.pubdate.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td><a href="{{ art.short_url }}" target="_blank">{{ art.short_url }}</a></td>
+    </tr>
+    {% endfor %}
+</table>
+<br>
+<button type="button" onclick="copySelected()">📋 선택 기사 복사</button>
+<button type="button" onclick="downloadSelected()">📄 선택 다운로드(.txt)</button>
+</form>
+<script>
+function copySelected() {
+    let checks = document.querySelectorAll('input[name=select_article]:checked');
+    let txts = [];
+    checks.forEach(chk => { txts.push(chk.value); });
+    if (txts.length === 0) {
+        alert('기사 선택하세요!');
+        return;
+    }
+    let t = document.createElement("textarea");
+    t.value = txts.join("\\n");
+    document.body.appendChild(t);
+    t.select();
+    document.execCommand('copy');
+    document.body.removeChild(t);
+    alert("복사되었습니다!");
+}
+function downloadSelected() {
+    let checks = document.querySelectorAll('input[name=select_article]:checked');
+    let txts = [];
+    checks.forEach(chk => { txts.push(chk.value); });
+    if (txts.length === 0) {
+        alert('기사 선택하세요!');
+        return;
+    }
+    let blob = new Blob([txts.join("\\n")], {type: "text/plain"});
+    let link = document.createElement('a');
+    link.href = window.URL.createObjectURL(blob);
+    link.download = "news.txt";
+    link.click();
+}
+</script>
+{% endif %}
 </body>
 </html>
