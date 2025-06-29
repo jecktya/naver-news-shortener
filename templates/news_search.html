@@ -2,78 +2,111 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>뉴스검색기</title>
+    <title>📰 네이버 뉴스검색기</title>
     <style>
-        textarea { width: 100%; min-height: 200px; }
-        .article-item { margin-bottom: 10px; border-bottom:1px solid #eee; padding: 5px;}
-        .btn { padding: 6px 10px; margin:2px; }
+        body { font-family: sans-serif; margin: 2em; }
+        .input-long { width: 100%; font-size: 1.1em; }
+        textarea { width: 100%; height: 220px; font-size: 1em; }
+        .result-row { margin-bottom: 8px; }
+        .toolbar { margin: 1em 0; }
+        .btn { padding: 4px 16px; margin-right: 10px; }
+        .checkbox-list { margin-bottom: 1em; }
     </style>
+    <script>
+        // 결과 선택/해제/복사/주소변환 JS
+        function toggleAll(check) {
+            document.querySelectorAll('.row-checkbox').forEach(e => {e.checked = check;});
+            updateText();
+        }
+        function updateText() {
+            let lines = [];
+            document.querySelectorAll('.row-checkbox').forEach((cb, i) => {
+                if (cb.checked) {
+                    let line = document.getElementById('resultline_' + i).innerText;
+                    lines.push(line);
+                }
+            });
+            document.getElementById('final_textarea').value = lines.join('\n\n');
+        }
+        async function copySelected() {
+            updateText();
+            const text = document.getElementById('final_textarea').value;
+            await navigator.clipboard.writeText(text);
+            alert('복사됨!');
+        }
+        async function shortenUrls() {
+            let urls = [];
+            document.querySelectorAll('.row-checkbox').forEach((cb, i) => {
+                if (cb.checked) {
+                    let url = cb.value;
+                    urls.push(url);
+                }
+            });
+            if (urls.length == 0) return;
+            document.getElementById('shortenBtn').innerText = "주소변환중...";
+            const resp = await fetch('/shorten', {
+                method: 'POST',
+                body: new URLSearchParams(urls.map(u => ['urls', u]))
+            });
+            const data = await resp.json();
+            document.querySelectorAll('.row-checkbox').forEach((cb, i) => {
+                if (cb.checked) {
+                    let line = document.getElementById('resultline_' + i).innerText;
+                    let old_url = cb.value;
+                    let new_url = data.shortened.shift();
+                    line = line.replace(old_url, new_url);
+                    document.getElementById('resultline_' + i).innerText = line;
+                }
+            });
+            updateText();
+            document.getElementById('shortenBtn').innerText = "선택 주소 단축변환";
+        }
+    </script>
 </head>
 <body>
-    <h2>📰 뉴스검색기</h2>
-    <form method="post" action="/search">
-        <input type="text" name="input_keywords" value="{{def_keywords}}">
-        <select name="search_mode">
-            <option value="전체" {% if search_mode=="전체" %}selected{% endif %}>전체</option>
-            <option value="주요언론사만" {% if search_mode=="주요언론사만" %}selected{% endif %}>주요언론사만</option>
-        </select>
-        <button type="submit" class="btn">🔍 뉴스 검색</button>
+    <h2>📰 네이버 뉴스검색기</h2>
+    <form method="post">
+        <input type="hidden" name="search_mode" value="major"/>
+        <div>
+            <label for="keywords">🔍 키워드 입력 (쉼표 구분):</label>
+            <input class="input-long" type="text" id="keywords" name="keywords" value="{{request.form.keywords if request.method=='POST' else default_keywords}}" placeholder="{{default_keywords}}" />
+        </div>
+        <div class="checkbox-list">
+            <label><input type="checkbox" name="checked_two_keywords" {% if checked_two_keywords %}checked{% endif %}> 2개 이상 키워드 포함 기사만 보기</label>
+        </div>
+        <button class="btn" type="submit">🔍 뉴스 검색</button>
     </form>
-    <br>
-    {% if articles %}
-    <form method="post" action="/shorten" id="copyForm">
-        <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
-        <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
-        <button type="button" class="btn" onclick="copySelected()">📋 선택 복사</button>
-        <button type="submit" class="btn">주소변환하기</button>
-        <div id="articleList">
-        {% for a in articles %}
-        <div class="article-item">
-            <input type="checkbox" name="selected" value="{{a.url}}" data-title="{{a.title}}" data-press="{{a.press}}" checked>
-            <b>{{a.title}}</b> ({{a.press}})
-            <div style="color:gray;font-size:12px;">🕒 {{a.pubdate.strftime('%Y-%m-%d %H:%M')}} | 키워드: {{a.matched|join(', ')}}</div>
-            <a href="{{a.url}}" target="_blank">[기사 보기]</a>
+
+    {% if msg %}
+        <div style="margin-top:1em; color:#777;">{{msg}}</div>
+    {% endif %}
+
+    {% if final_results %}
+    <div class="toolbar">
+        <button class="btn" type="button" onclick="toggleAll(true)">✅ 전체 선택</button>
+        <button class="btn" type="button" onclick="toggleAll(false)">❌ 전체 해제</button>
+        <button class="btn" type="button" onclick="copySelected()">📋 선택 복사</button>
+    </div>
+    <div>
+        {% for row in final_results %}
+        <div class="result-row">
+            <input class="row-checkbox" type="checkbox" value="{{row.url}}" checked onchange="updateText()"/>
+            <span id="resultline_{{loop.index0}}">
+                ■ {{row.title}} ({{row.press}}) | {{row.pubdate.strftime('%Y-%m-%d %H:%M')}} | 키워드: {{row.matched|join(', ')}}<br>
+                {{row.url}}
+            </span>
         </div>
         {% endfor %}
-        </div>
-        <input type="hidden" name="selected_keys" id="selected_keys">
-        <input type="hidden" name="titles" id="titles">
-        <input type="hidden" name="presses" id="presses">
-        <textarea id="final_txt"></textarea>
-    </form>
-    <script>
-        function updateTextarea() {
-            let out = [], urls=[], titles=[], presses=[];
-            document.querySelectorAll("input[name='selected']:checked").forEach(chk=>{
-                let title = chk.dataset.title || chk.value;
-                let press = chk.dataset.press || '';
-                out.push("■ " + title + " (" + press + ")\n" + chk.value);
-                urls.push(chk.value);
-                titles.push(title);
-                presses.push(press);
-            });
-            document.getElementById('final_txt').value = out.join('\n\n');
-            document.getElementById('selected_keys').value = urls.join('\n');
-            document.getElementById('titles').value = titles.join('\n');
-            document.getElementById('presses').value = presses.join('\n');
-        }
-        document.querySelectorAll("input[name='selected']").forEach(chk=>{
-            chk.addEventListener('change', updateTextarea);
-        });
-        function selectAll(flag){
-            document.querySelectorAll("input[name='selected']").forEach(chk=>{
-                chk.checked=flag;
-            });
-            updateTextarea();
-        }
-        function copySelected() {
-            updateTextarea();
-            document.getElementById('final_txt').select();
-            document.execCommand('copy');
-            alert("복사되었습니다.");
-        }
-        updateTextarea();
-    </script>
+    </div>
+    <textarea id="final_textarea" readonly>
+{% for row in final_results %}
+■ {{row.title}} ({{row.press}}) | {{row.pubdate.strftime('%Y-%m-%d %H:%M')}} | 키워드: {{row.matched|join(', ')}}
+{{row.url}}
+{% endfor %}
+    </textarea>
+    <div>
+        <button class="btn" id="shortenBtn" type="button" onclick="shortenUrls()">선택 주소 단축변환</button>
+    </div>
     {% endif %}
 </body>
 </html>
