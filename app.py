@@ -1,218 +1,189 @@
-import os
+# -*- coding: utf-8 -*-
+import os, re, asyncio
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.staticfiles import StaticFiles
 from bs4 import BeautifulSoup
-import requests
-import asyncio
-
-try:
-    from playwright.async_api import async_playwright
-except ImportError:
-    async_playwright = None  # 서버 환경에 따라 playwright 설치 안될 수도 있음
+import httpx
+from datetime import datetime, timedelta
+from typing import List, Dict
 
 app = FastAPI()
+app.add_middleware(SessionMiddleware, secret_key="news!search!secret")
+app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 templates = Jinja2Templates(directory="templates")
-app.add_middleware(SessionMiddleware, secret_key="your-secret-key")
 
-# ------- 기본 설정 -------
-DEFAULT_KEYWORDS = [
-    "육군", "국방", "외교", "안보", "북한",
-    "신병", "교육대", "훈련", "간부", "장교",
-    "부사관", "병사", "용사", "군무원"
-]
+DEFAULT_KEYWORDS = ['육군', '국방', '외교', '안보', '북한', '신병', '교육대', '훈련', '간부', '장교', '부사관', '병사', '용사', '군무원']
+PRESS_MAJOR = set([
+    '연합뉴스', '조선일보', '한겨레', '중앙일보', 'MBN', 'KBS', 'SBS', 'YTN',
+    '동아일보', '세계일보', '문화일보', '뉴시스', '국민일보', '국방일보', '이데일리',
+    '뉴스1', 'JTBC'
+])
 
-PRESS_NAMES = [
-    "연합뉴스", "조선일보", "중앙일보", "동아일보", "한겨레",
-    "세계일보", "서울신문", "경향신문", "국민일보", "한국일보",
-    "뉴시스", "JTBC", "YTN", "KBS", "MBC", "SBS", "TV조선",
-    "채널A", "MBN"
-]
-
-def make_search_url(keywords, mode="major", video_only=False):
-    base_url = "https://m.search.naver.com/search.naver?ssc=tab.m_news.all"
-    q = " | ".join(keywords)
-    params = {
-        "query": q,
-        "sort": "1",
-        "photo": "2" if video_only else "0",
-        "pd": "0",  # 전체 기간
-        "ds": "",
-        "de": "",
-        "where": "m_news",
-        "sm": "mtb_opt"
-    }
-    if mode == "major":
-        params["mynews"] = "1"
-    elif mode == "main_pc":
-        params["office_type"] = "1"
-    elif mode == "main_mobile":
-        params["office_type"] = "2"
-    # 쿼리스트링 생성
-    param_str = "&".join([f"{k}={requests.utils.quote(str(v))}" for k, v in params.items()])
-    return f"{base_url}&{param_str}"
-
-def fetch_articles(search_url, checked_two_keywords, keywords):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"
-    }
-    res = requests.get(search_url, headers=headers)
-    soup = BeautifulSoup(res.text, "html.parser")
-    articles = []
-    for wrap in soup.select(".news_wrap.api_ani_send"):
-        tit_tag = wrap.select_one(".news_tit")
-        if not tit_tag:
+def parse_newslist(html:str, keywords:List[str], search_mode:str, video_only:bool) -> List[Dict]:
+    soup = BeautifulSoup(html, "html.parser")
+    news_cards = soup.select(".news_area, .bx")
+    now = datetime.now()
+    results = []
+    for card in news_cards:
+        a = card.select_one("a.news_tit, a")
+        if not a: continue
+        title = a["title"] if a.has_attr("title") else a.get_text(strip=True)
+        url = a["href"]
+        press = card.select_one(".info.press")
+        press_name = press.get_text(strip=True).replace("언론사 선정", "") if press else ""
+        desc = card.select_one(".dsc_wrap") or card.select_one(".desc")
+        desc_txt = desc.get_text(" ", strip=True) if desc else ""
+        pubdate = card.select_one(".info_group .date, .info .date")
+        pub_str = pubdate.get_text(strip=True) if pubdate else ""
+        pub_kst = parse_time(pub_str)
+        # 4시간 이내
+        if not pub_kst or (now - pub_kst > timedelta(hours=4)):
             continue
-        title = tit_tag.text.strip()
-        url = tit_tag.get("href")
-        press_tag = wrap.select_one(".info.press")
-        press = press_tag.text.strip().replace("언론사 선정", "") if press_tag else ""
-        date_tag = wrap.select_one(".info_group .info:not(.press)")
-        pubdate = date_tag.text.strip() if date_tag else ""
-        # 키워드 매칭 횟수 세기
-        kw_counts = {kw: title.count(kw) for kw in keywords}
-        match_count = sum(1 for c in kw_counts.values() if c > 0)
-        kw_hit_summary = [(kw, cnt) for kw, cnt in kw_counts.items() if cnt > 0]
-        # "2개 이상 키워드" 옵션
-        if checked_two_keywords and match_count < 2:
+        # 주요언론사 only
+        if search_mode=="major" and press_name and press_name not in PRESS_MAJOR:
             continue
-        articles.append({
-            "title": title,
-            "url": url,
-            "press": press,
-            "pubdate": pubdate,
-            "matched_keywords": kw_hit_summary,
-        })
-    return articles
+        # 동영상 only
+        if video_only:
+            if not card.select_one("a.news_thumb[href*='tv.naver.com'], a.news_thumb[href*='video.naver.com'], span[class*=video]"):
+                continue
+        # 키워드 매칭/카운트
+        kwcnt = {}
+        for kw in keywords:
+            pat = re.compile(re.escape(kw), re.IGNORECASE)
+            c = pat.findall(title+desc_txt)
+            if c: kwcnt[kw] = len(c)
+        if not kwcnt: continue
+        results.append(dict(
+            title=title, url=url, press=press_name,
+            pubdate=pub_kst.strftime('%Y-%m-%d %H:%M'), 
+            keywords=sorted(kwcnt.items(), key=lambda x:(-x[1], x[0])),
+            kw_count=sum(kwcnt.values())
+        ))
+    # 2개이상 키워드 포함 only 필터
+    return sorted(results, key=lambda x:(-x['kw_count'], x['pubdate']))
 
-# 단축주소 변환 (Playwright)
-async def get_naverme_url(long_url):
-    if not async_playwright:
-        return None, "Playwright 미설치"
+def parse_time(timestr):
+    if not timestr: return None
+    now = datetime.now()
+    if "분 전" in timestr:
+        min_ago = int(timestr.split("분")[0])
+        return now - timedelta(minutes=min_ago)
+    if "시간 전" in timestr:
+        hr_ago = int(timestr.split("시간")[0])
+        return now - timedelta(hours=hr_ago)
+    try:
+        if re.match(r"\d{4}\.\d{2}\.\d{2}", timestr):
+            t = datetime.strptime(timestr, "%Y.%m.%d.")
+            return t.replace(hour=0, minute=0)
+    except: pass
+    return now
+
+async def get_news_html(query, video_only, date=None):
+    dt = date or datetime.now().strftime("%Y.%m.%d")
+    smode = "2" if video_only else "0"
+    url = f"https://m.search.naver.com/search.naver?ssc=tab.m_news.all&query={query}&sm=mtb_opt&sort=1&photo={smode}&field=0&pd=0&ds={dt}&de={dt}&docid=&related=0&mynews=0&office_type=0&office_section_code=0&news_office_checked=&nso=so%3Add%2Cp%3Aall"
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(url, headers={"User-Agent":"Mozilla/5.0"})
+        return r.text
+
+from playwright.async_api import async_playwright
+
+async def naver_me_shorten(orig_url):
+    if not orig_url.startswith("https://n.news.naver.com/"): return orig_url, "n.news.naver.com 아님"
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page(user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)")
-            await page.goto(long_url, timeout=10000)
-            # "공유" 버튼의 selector는 대표 selector, 혹 실패하면 error 반환
-            try:
-                await page.wait_for_selector("#spiButton > span > span", timeout=5000)
-                await page.click("#spiButton > span > span")
-                await page.wait_for_selector('input#spiInput', timeout=5000)
-                short_url = await page.input_value('input#spiInput')
-            except Exception as e:
-                short_url = None
+            page = await browser.new_page(viewport={"width":400, "height":800}, user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)")
+            await page.goto(orig_url, timeout=8000)
+            await page.wait_for_selector("span.u_hc, span:has-text('SNS 보내기')", timeout=7000)
+            btn = await page.query_selector("span.u_hc, span:has-text('SNS 보내기')")
+            if not btn:
+                await browser.close()
+                return orig_url, "공유 버튼 selector 못찾음"
+            await btn.click()
+            await page.wait_for_selector("#spiButton a, .spi_sns_list .link_sns", timeout=6000)
+            link_elem = await page.query_selector("#spiButton a, .spi_sns_list .link_sns")
+            link = await link_elem.get_attribute("data-url") if link_elem else None
             await browser.close()
-        if not short_url or not short_url.startswith("https://naver.me/"):
-            return None, "공유 버튼 selector를 찾지 못함"
-        return short_url, ""
+            if link and link.startswith("https://naver.me/"):
+                return link, ""
+            return orig_url, "naver.me 주소 못찾음"
     except Exception as e:
-        return None, f"Playwright 오류: {e}"
+        return orig_url, f"Playwright 오류: {str(e)}"
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=None)
 async def main(request: Request):
-    return templates.TemplateResponse("news_search.html", {
-        "request": request,
-        "keywords": ", ".join(DEFAULT_KEYWORDS),
-        "default_keywords": ", ".join(DEFAULT_KEYWORDS),
-        "checked_two_keywords": False,
-        "search_mode": "major",
-        "video_only": False,
-        "final_results": [],
-        "copy_area": "",
-        "fail_msgs": [],
-        "msg": "",
-    })
+    return await render_news(request)
 
-@app.post("/", response_class=HTMLResponse)
-async def main_post(
-    request: Request,
+@app.post("/", response_class=None)
+async def main_post(request: Request,
     keywords: str = Form(""),
-    checked_two_keywords: str = Form(None),
+    checked_two_keywords: str = Form(""),
     search_mode: str = Form("major"),
-    video_only: str = Form(None),
+    video_only: str = Form(""),
 ):
-    keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
-    checked_two = checked_two_keywords == "on"
-    video_only_val = bool(video_only)
-    search_url = make_search_url(keyword_list, search_mode, video_only_val)
-    articles = fetch_articles(search_url, checked_two, keyword_list)
-    msg = f"총 {len(articles)}건의 뉴스가 검색되었습니다."
-    # 키워드 많은 순 정렬
-    for a in articles:
-        a["matched_keywords"] = sorted(a["matched_keywords"], key=lambda x: -x[1])
-    copy_area = "\n\n".join([
-        f"[{a['press']}] {a['title']}\n{a['url']}" for a in articles
-    ])
+    return await render_news(request, keywords, checked_two_keywords, search_mode, video_only)
+
+async def render_news(request, keywords="", checked_two_keywords="", search_mode="major", video_only=""):
+    # 키워드 입력 및 정제
+    if not keywords:
+        keyword_input = ", ".join(DEFAULT_KEYWORDS)
+        kwlist = DEFAULT_KEYWORDS
+    else:
+        keyword_input = keywords
+        kwlist = [k.strip() for k in re.split(r"[,\|]", keywords) if k.strip()]
+    # 검색쿼리 생성 (|로 조합, 7글자 이내 10개 제한)
+    query = " | ".join(kwlist)
+    html = await get_news_html(query, video_only=="on")
+    newslist = parse_newslist(html, kwlist, search_mode, video_only=="on")
+    # 2개 이상 키워드만
+    checked_two = checked_two_keywords=="on"
+    filtered = [a for a in newslist if len([cnt for k,cnt in a['keywords'] if c>0])>=2] if checked_two else newslist
+    msg = f"총 {len(filtered)}건의 뉴스가 검색되었습니다."
     return templates.TemplateResponse("news_search.html", {
         "request": request,
-        "keywords": keywords,
         "default_keywords": ", ".join(DEFAULT_KEYWORDS),
+        "keyword_input": keyword_input,
+        "final_results": filtered,
+        "msg": msg,
         "checked_two_keywords": checked_two,
         "search_mode": search_mode,
-        "video_only": video_only_val,
-        "final_results": articles,
-        "copy_area": copy_area,
-        "fail_msgs": [],
-        "msg": msg,
+        "video_only": video_only=="on",
+        "shortened": None,
+        "shorten_fail": [],
     })
 
-@app.post("/shorten", response_class=HTMLResponse)
-async def shorten(
+@app.post("/shorten")
+async def shorten_urls(
     request: Request,
     keywords: str = Form(""),
-    checked_two_keywords: str = Form(None),
+    checked_two_keywords: str = Form(""),
     search_mode: str = Form("major"),
-    video_only: str = Form(None),
-    selected_urls: list = Form([]),
-    copy_area: str = Form(""),
+    video_only: str = Form(""),
+    selected_urls: List[str] = Form([])
 ):
-    # 기존 결과에서 선택된 url만 변환
-    urls = selected_urls if isinstance(selected_urls, list) else [selected_urls]
-    lines = copy_area.split("\n\n")
-    short_url_map = {}
-    fail_msgs = []
-    for line in lines:
-        if not line.strip():
-            continue
-        parts = line.strip().split("\n")
-        if len(parts) != 2:
-            continue
-        press_title, url = parts
-        if url.startswith("https://n.news.naver.com/"):
-            short_url, fail_reason = await get_naverme_url(url)
-            if short_url:
-                short_url_map[url] = short_url
-            else:
-                fail_msgs.append(f"{press_title}: {fail_reason}")
-    # 바꾼 결과 반영
-    new_lines = []
-    for line in lines:
-        parts = line.strip().split("\n")
-        if len(parts) == 2 and parts[1] in short_url_map:
-            new_lines.append(f"{parts[0]}\n{short_url_map[parts[1]]}")
-        else:
-            new_lines.append(line)
-    copy_area2 = "\n\n".join(new_lines)
+    # 키워드 파싱
+    kwlist = [k.strip() for k in re.split(r"[,\|]", keywords) if k.strip()]
+    query = " | ".join(kwlist)
+    html = await get_news_html(query, video_only=="on")
+    newslist = parse_newslist(html, kwlist, search_mode, video_only=="on")
+    checked_two = checked_two_keywords=="on"
+    filtered = [a for a in newslist if len([cnt for k,cnt in a['keywords'] if c>0])>=2] if checked_two else newslist
+    idx_set = set(map(int, selected_urls)) if isinstance(selected_urls, list) else set()
+    selected = [filtered[i] for i in idx_set if 0<=i<len(filtered)]
+    # 단축주소 변환
+    shortened_lines = []
+    shorten_fail = []
+    for art in selected:
+        short_url, fail = await naver_me_shorten(art["url"])
+        line = f"■ {art['title']} ({art['press']})\n{short_url}"
+        shortened_lines.append(line)
+        if fail:
+            shorten_fail.append(f"{art['title']}: {fail}")
+    # 미선택 결과도 계속 노출
+    msg = f"총 {len(filtered)}건의 뉴스가 검색되었습니다."
     return templates.TemplateResponse("news_search.html", {
-        "request": request,
-        "keywords": keywords,
-        "default_keywords": ", ".join(DEFAULT_KEYWORDS),
-        "checked_two_keywords": checked_two_keywords == "on",
-        "search_mode": search_mode,
-        "video_only": bool(video_only),
-        "final_results": [],
-        "copy_area": copy_area2,
-        "fail_msgs": fail_msgs,
-        "msg": "단축주소 변환 완료"
-    })
-
-# 디버그용 API
-@app.get("/debug", response_class=PlainTextResponse)
-async def debug():
-    import datetime
-    now = datetime.datetime.now()
-    return f"서버시간: {now}"
-
+        "request":
