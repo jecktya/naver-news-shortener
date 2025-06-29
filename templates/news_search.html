@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>📰 뉴스검색기 (FastAPI 버전)</title>
+    <title>📰 뉴스검색기 (FastAPI+Playwright)</title>
     <style>
         body { font-family: 'Malgun Gothic', sans-serif; background:#fcfcfc; margin:40px;}
         input[type=text], textarea { font-size:1.1em; padding:4px; border:1px solid #ccc; border-radius:5px;}
@@ -12,38 +12,25 @@
         .btn-selected { background:#4287f5; color:#fff;}
         .copytxt { width:100%; min-height:120px; font-size:1.05em; margin-top:10px; }
         .small { font-size:0.95em; color:gray;}
-        .fail-list { color: #d03f3f; font-size:0.98em; margin:10px 0 0 0;}
     </style>
     <script>
-    // 즉시 textarea 업데이트
-    function updateCopyArea() {
-        let checked = document.querySelectorAll('input[name="selected_urls"]:checked');
-        let results = [];
-        checked.forEach(cb => {
-            let idx = cb.value;
-            let block = document.getElementById('block_' + idx);
-            if (block) results.push(block.innerText.trim() + "\n" + cb.dataset.url + "\n");
-        });
-        document.getElementById("copy_area").value = results.join('\n');
-    }
     function selectAll(val) {
         let cbs = document.querySelectorAll('input[name="selected_urls"]');
-        cbs.forEach(cb => { cb.checked = val; });
-        updateCopyArea();
+        cbs.forEach(cb => cb.checked = val);
+        document.getElementById("result_form").submit();
     }
     function copyText() {
         let ta = document.getElementById("copy_area");
         ta.select(); document.execCommand("copy");
         alert("복사 완료!");
     }
-    window.onload = function() { updateCopyArea(); }
     </script>
 </head>
 <body>
     <h2>📰 뉴스검색기 (FastAPI+Playwright)</h2>
     <form method="post">
         <label>키워드 입력 (쉼표로 구분):</label><br>
-        <input type="text" name="keywords" style="width:98%;" value="{{ request.form.keywords or default_keywords }}" />
+        <input type="text" name="keywords" style="width:98%;" value="{{request.form.keywords or default_keywords}}" />
         <span class="small">예: 육군, 국방, 외교, 신병, 교육대 ... (수정/추가/삭제 자유)</span><br>
         <input type="checkbox" name="checked_two_keywords" value="on" {% if checked_two_keywords %}checked{% endif %}> 2개 이상 키워드 포함만 보기
         &nbsp;&nbsp;
@@ -54,46 +41,34 @@
         <button type="submit" class="btn">🔍 뉴스 검색</button>
     </form>
     {% if msg %}
-    <div class="msg">{{ msg }}</div>
+    <div class="msg" style="color:tomato;">{{msg|safe}}</div>
     {% endif %}
     {% if final_results %}
-    <form method="post" action="/shorten">
-        <input type="hidden" name="keywords" value="{{ request.form.keywords or default_keywords }}">
-        <input type="hidden" name="checked_two_keywords" value="{{ 'on' if checked_two_keywords else '' }}">
-        <input type="hidden" name="search_mode" value="{{ search_mode }}">
-        <div style="margin:10px 0;">
-            <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
-            <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
-        </div>
+    <form method="post" id="result_form" action="/shorten">
+        <input type="hidden" name="keywords" value="{{request.form.keywords or default_keywords}}">
+        <input type="hidden" name="checked_two_keywords" value="{{'on' if checked_two_keywords else ''}}">
+        <input type="hidden" name="search_mode" value="{{search_mode}}">
+        <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
+        <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
+        <button type="button" class="btn" onclick="copyText()">📋 복사</button>
+        <br>
         {% for art in final_results %}
-        <div style="border-bottom:1px solid #eee; padding:7px 0;">
-            <input type="checkbox" name="selected_urls" value="{{ loop.index0 }}" class="checkbox"
-                data-url="{{ art.url }}" {% if art.url in selected_urls %}checked{% endif %}
-                onchange="updateCopyArea()">
-            <b id="block_{{ loop.index0 }}">{{ art.title }}</b> ({{ art.press }})<br>
-            <span class="small">🕒 {{ art.pubdate }} | 키워드: {{ art.matched|join(', ') }}</span><br>
-            <a href="{{ art.url }}" target="_blank" style="font-size:0.97em; color:#4287f5;">기사 바로보기</a>
+        <div>
+            <input type="checkbox" class="checkbox" name="selected_urls" value="{{art.url}}" {% if art.url in selected_urls %}checked{% endif %} onchange="this.form.submit();">
+            <b>{{art.title}}</b> ({{art.press}})
+            <span class="small">[키워드: 
+                {% for k, v in art.kw_counts.most_common() %}
+                    {{k}}({{v}})
+                    {% if not loop.last %}, {% endif %}
+                {% endfor %}
+            ]</span><br>
+            <a href="{{art.url}}" target="_blank">{{art.url}}</a>
+            <hr>
         </div>
         {% endfor %}
-        <textarea id="copy_area" class="copytxt" readonly></textarea>
-        <div>
-            <button type="button" class="btn" onclick="copyText()">📋 선택 복사</button>
-            <button type="submit" class="btn">주소변환(네이버me)</button>
-        </div>
+        <textarea id="copy_area" name="copy_area" class="copytxt" readonly>{{copy_area}}</textarea><br>
+        <button type="submit" class="btn" style="margin-top:8px;">🪄 선택된 주소 단축변환</button>
     </form>
-    {% if failed_urls %}
-        <div class="fail-list">
-            <b>※ 변환 실패 목록:</b>
-            <ul>
-            {% for fail in failed_urls %}
-                <li>{{ fail.title }} ({{ fail.press }})<br>
-                <span style="color:gray">{{ fail.url }}</span><br>
-                <span style="color:#b90000;">실패 사유: {{ fail.reason }}</span>
-                </li>
-            {% endfor %}
-            </ul>
-        </div>
-    {% endif %}
     {% endif %}
 </body>
 </html>
