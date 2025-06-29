@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+    <title>뉴스검색기 - FastAPI+Jinja2+Playwright</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 40px; background: #f6f8fa; }
+        .debug { background: #fff8c6; color: #222; padding: 8px 12px; border-radius: 6px; margin: 6px 0; font-size: 14px;}
+        .card { background: #fff; padding: 18px; margin-bottom: 14px; border-radius: 12px; box-shadow: 0 2px 12px #eee; }
+    </style>
+</head>
+<body>
+    <h2>📰 뉴스검색기 <span style="font-size:14px;color:gray;">(FastAPI+Jinja2+Playwright)</span></h2>
+    <form method="post">
+        <label>키워드 (쉼표로 구분):</label>
+        <input name="keywords" value="육군,국방,외교" style="width:350px;">
+        <button type="submit">검색</button>
+    </form>
+    <div>
+    {% if now %}<div style="color:gray;font-size:13px;">현재 시각: {{now}}</div>{% endif %}
+    {% for msg in debug_msgs %}
+        <div class="debug">{{ msg }}</div>
+    {% endfor %}
+    </div>
+    {% if results %}
+        <h4>검색결과 ({{results|length}}건)</h4>
+        {% for art in results %}
+            <div class="card">
+                <b>{{art.title}}</b> ({{art.press}})
+                <div style="font-size:13px;color:gray;">
+                    🕒 {{art.pubdate.strftime("%Y-%m-%d %H:%M") if art.pubdate else ""}}
+                    | 키워드: {{art.matched|join(", ")}}
+                </div>
+                <div>
+                    <a href="{{art.short_url}}" target="_blank">{{art.short_url}}</a>
+                </div>
+                <div style="color:#666;">{{art.desc}}</div>
+            </div>
+        {% endfor %}
+    {% endif %}
+</body>
+</html>
