@@ -12,7 +12,9 @@ from typing import List, Dict
 
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key="news!search!secret")
-app.mount("/static", StaticFiles(directory="static", html=True), name="static")
+# static 디렉토리 있으면 mount, 없으면 무시
+if os.path.isdir("static"):
+    app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 templates = Jinja2Templates(directory="templates")
 
 DEFAULT_KEYWORDS = ['육군', '국방', '외교', '안보', '북한', '신병', '교육대', '훈련', '간부', '장교', '부사관', '병사', '용사', '군무원']
@@ -62,8 +64,9 @@ def parse_newslist(html:str, keywords:List[str], search_mode:str, video_only:boo
             keywords=sorted(kwcnt.items(), key=lambda x:(-x[1], x[0])),
             kw_count=sum(kwcnt.values())
         ))
-    # 2개이상 키워드 포함 only 필터
-    return sorted(results, key=lambda x:(-x['kw_count'], x['pubdate']))
+    # 키워드 매칭 많은 순 정렬
+    results = sorted(results, key=lambda x:(-x['kw_count'], x['pubdate']), reverse=False)
+    return results
 
 def parse_time(timestr):
     if not timestr: return None
@@ -135,7 +138,7 @@ async def render_news(request, keywords="", checked_two_keywords="", search_mode
     else:
         keyword_input = keywords
         kwlist = [k.strip() for k in re.split(r"[,\|]", keywords) if k.strip()]
-    # 검색쿼리 생성 (|로 조합, 7글자 이내 10개 제한)
+    # 검색쿼리 생성 (|로 조합)
     query = " | ".join(kwlist)
     html = await get_news_html(query, video_only=="on")
     newslist = parse_newslist(html, kwlist, search_mode, video_only=="on")
@@ -165,7 +168,6 @@ async def shorten_urls(
     video_only: str = Form(""),
     selected_urls: List[str] = Form([])
 ):
-    # 키워드 파싱
     kwlist = [k.strip() for k in re.split(r"[,\|]", keywords) if k.strip()]
     query = " | ".join(kwlist)
     html = await get_news_html(query, video_only=="on")
@@ -174,7 +176,6 @@ async def shorten_urls(
     filtered = [a for a in newslist if len([cnt for k,cnt in a['keywords'] if c>0])>=2] if checked_two else newslist
     idx_set = set(map(int, selected_urls)) if isinstance(selected_urls, list) else set()
     selected = [filtered[i] for i in idx_set if 0<=i<len(filtered)]
-    # 단축주소 변환
     shortened_lines = []
     shorten_fail = []
     for art in selected:
@@ -183,7 +184,17 @@ async def shorten_urls(
         shortened_lines.append(line)
         if fail:
             shorten_fail.append(f"{art['title']}: {fail}")
-    # 미선택 결과도 계속 노출
+    # 복사 영역: 전체 기사 복사 결과도 항상 제공
     msg = f"총 {len(filtered)}건의 뉴스가 검색되었습니다."
     return templates.TemplateResponse("news_search.html", {
-        "request":
+        "request": request,
+        "default_keywords": ", ".join(DEFAULT_KEYWORDS),
+        "keyword_input": keywords,
+        "final_results": filtered,
+        "msg": msg,
+        "checked_two_keywords": checked_two,
+        "search_mode": search_mode,
+        "video_only": video_only=="on",
+        "shortened": "\n\n".join(shortened_lines),
+        "shorten_fail": shorten_fail,
+    })
