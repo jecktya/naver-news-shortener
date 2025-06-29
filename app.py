@@ -1,17 +1,13 @@
-from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse
-
-app = FastAPI()
-
-@app.get("/debug", response_class=PlainTextResponse)
-async def debug():
-    import os
-    from datetime import datetime
-    NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID")
-    NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
-    now = datetime.now().isoformat()
-    return (
-        f"NAVER_CLIENT_ID: {NAVER_CLIENT_ID}\n"
-        f"NAVER_CLIENT_SECRET: {NAVER_CLIENT_SECRET}\n"
-        f"서버시간: {now}"
-    )
+@app.get("/debug-playwright", response_class=PlainTextResponse)
+async def debug_playwright():
+    try:
+        from playwright.async_api import async_playwright
+        async def run():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                await browser.close()
+            return "Playwright 정상 동작!"
+        import asyncio
+        return await run()
+    except Exception as e:
+        return f"Playwright 오류: {e}"
