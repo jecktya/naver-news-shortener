@@ -9,11 +9,13 @@
         .card { background: #fff; padding: 18px; margin-bottom: 14px; border-radius: 14px; box-shadow: 0 2px 12px #ececec;}
         .btn { padding:5px 12px; font-size:15px; margin: 0 4px;}
         .small {font-size:13px;color:gray;}
+        textarea { width:98%; font-size:15px; margin-top:10px; border-radius:8px; }
     </style>
     <script>
         // 전체 선택/해제
         function selectAll(val) {
             document.querySelectorAll("input[name='selected']").forEach(chk=>{chk.checked=val;});
+            updateFinalText();
         }
         // 복사 기능
         function copySelected() {
@@ -26,12 +28,20 @@
             navigator.clipboard.writeText(txt);
             alert("복사되었습니다!");
         }
+        function updateFinalText() {
+            let arr = [];
+            document.querySelectorAll("input[name='selected']:checked").forEach(chk=>{
+                let t = chk.dataset.title, p = chk.dataset.press, u = chk.dataset.short;
+                arr.push(`■ ${t} (${p})\n${u}`);
+            });
+            document.getElementById('final_txt').value = arr.join('\n\n');
+        }
     </script>
 </head>
 <body>
     <h2>📰 뉴스검색기 (FastAPI+Jinja2+Playwright)</h2>
     <form method="post">
-        <input name="keywords" value="{{keywords}}" style="width:320px;" placeholder="키워드(쉼표로 구분)">
+        <input name="keywords" value="{{keywords}}" style="width:420px;" placeholder="키워드(쉼표로 구분)">
         <select name="search_mode">
             <option value="전체" {% if search_mode=='전체' %}selected{% endif %}>전체</option>
             <option value="동영상만" {% if search_mode=='동영상만' %}selected{% endif %}>동영상만</option>
@@ -45,28 +55,29 @@
     {% endfor %}
     {% if results %}
     <hr>
-    <form method="post" action="/download">
+    <div>
         <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
         <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
         <button type="button" class="btn" onclick="copySelected()">📋 선택 복사</button>
-        <button type="submit" class="btn">📄 선택 다운로드</button>
-        <br><br>
+    </div>
+    <form method="post" action="/download" onsubmit="return true;">
         {% for art in results %}
         <div class="card">
             <input type="checkbox" name="selected" value="{{art.url}}" checked 
-                data-title="{{art.title}}" data-press="{{art.press}}" data-short="{{art.short_url}}">
+                data-title="{{art.title}}" data-press="{{art.press}}" data-short="{{art.short_url}}" onclick="updateFinalText()">
             <b>{{art.title}}</b> ({{art.press}})
             <span class="small">🕒 {{art.pubdate.strftime("%Y-%m-%d %H:%M")}} | 키워드: {{art.matched|join(", ")}}</span>
             <div>
                 <a href="{{art.short_url}}" target="_blank">{{art.short_url}}</a>
             </div>
-            <input type="hidden" name="titles" value="{{art.title}}">
-            <input type="hidden" name="press" value="{{art.press}}">
-            <input type="hidden" name="urls" value="{{art.short_url}}">
             <div class="small">{{art.desc}}</div>
         </div>
         {% endfor %}
+        <textarea id="final_txt" name="final_txt" rows="8" readonly>{{final_txt}}</textarea>
+        <br>
+        <button type="submit" class="btn">📄 선택 다운로드</button>
     </form>
+    <script>updateFinalText();</script>
     {% endif %}
 </body>
 </html>
