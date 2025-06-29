@@ -1,6 +1,6 @@
-streamlit
+flask
 requests
 beautifulsoup4
 feedparser
 langdetect
-playwright
+
