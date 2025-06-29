@@ -45,20 +45,22 @@ def parse_pubdate(pubdate_str):
         return None
 
 async def get_short_url(long_url, debug_msgs):
-    """실제 서비스 시, 네이버 단축주소 발급 사이트 구조 맞춰 수정!"""
+    # 실제 서비스에 맞게 단축주소 자동화 코드로 변경 필요!
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
-            await page.goto("https://me2.do/")  # 임시 예시
-            # 실제 동작 코드는 네이버 단축주소 발급 사이트에 맞춰 커스터마이즈 필요!
-            short_url = long_url  # 실서비스용은 이 부분을 교체
+            await page.goto("https://me2.do/")  # 예시, 실제 네이버 단축주소 사이트로 바꿔야 함
+            # 실제 네이버 단축주소 발급 자동화 코드 필요
+            short_url = long_url  # (테스트시 long_url 그대로 사용)
             await browser.close()
         debug_msgs.append(f"Playwright: {long_url} → {short_url}")
         return short_url
     except Exception as e:
         debug_msgs.append(f"Playwright 오류: {e}")
         return long_url
+
+DEFAULT_KEYWORDS = "육군, 국방, 외교, 안보, 북한, 신병교육대, 훈련, 간부, 장교, 부사관, 병사, 용사, 군무원"
 
 @app.get("/", response_class=HTMLResponse)
 async def get_form(request: Request):
@@ -67,17 +69,18 @@ async def get_form(request: Request):
         "request": request,
         "results": [],
         "selected": [],
-        "search_mode": "전체",
-        "keywords": "",
+        "search_mode": "주요언론사만",   # 기본값 주요언론사만
+        "keywords": DEFAULT_KEYWORDS,
         "debug_msgs": [],
         "now": now.strftime("%Y-%m-%d %H:%M"),
+        "final_txt": ""
     })
 
 @app.post("/", response_class=HTMLResponse)
 async def post_search(
     request: Request,
     keywords: str = Form(...),
-    search_mode: str = Form("전체"),
+    search_mode: str = Form("주요언론사만"),
     selected: list = Form(None)
 ):
     debug_msgs = []
@@ -87,7 +90,7 @@ async def post_search(
         return templates.TemplateResponse("news_search.html", {
             "request": request, "results": [], "selected": [],
             "search_mode": search_mode, "keywords": keywords,
-            "debug_msgs": debug_msgs, "now": now.strftime("%Y-%m-%d %H:%M"),
+            "debug_msgs": debug_msgs, "now": now.strftime("%Y-%m-%d %H:%M"), "final_txt": ""
         })
 
     # 키워드 리스트 생성
@@ -145,35 +148,35 @@ async def post_search(
         articles.append(v)
     articles = sorted(articles, key=lambda x: x['pubdate'], reverse=True)
 
-    # 모든 기사 url 단축주소화 (순차, 병렬화 필요시 gather 등 사용)
+    # 모든 기사 url 단축주소화 (실제 구현시 병렬처리 권장)
     for art in articles:
         art["short_url"] = await get_short_url(art["url"], debug_msgs)
+
+    # 선택된 기사만 텍스트 생성
+    selected_keys = selected or [a["url"] for a in articles]
+    final_txt = "\n\n".join([
+        f"■ {a['title']} ({a['press']})\n{a['short_url']}"
+        for a in articles if a["url"] in selected_keys
+    ])
 
     return templates.TemplateResponse("news_search.html", {
         "request": request,
         "results": articles,
-        "selected": selected or [a["url"] for a in articles],
+        "selected": selected_keys,
         "search_mode": search_mode,
         "keywords": keywords,
         "debug_msgs": debug_msgs,
         "now": now.strftime("%Y-%m-%d %H:%M"),
+        "final_txt": final_txt
     })
 
 @app.post("/download", response_class=Response)
 async def download_news(
     request: Request,
-    selected: list = Form(...),
-    titles: list = Form(...),
-    press: list = Form(...),
-    urls: list = Form(...)
+    final_txt: str = Form(...)
 ):
-    # txt로 다운
-    lines = []
-    for i, url in enumerate(selected):
-        lines.append(f"■ {titles[i]} ({press[i]})\n{urls[i]}")
-    txt = "\n\n".join(lines)
     return StreamingResponse(
-        iter([txt]), 
+        iter([final_txt]), 
         media_type="text/plain", 
         headers={"Content-Disposition": "attachment; filename=news.txt"}
     )
