@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>네이버 뉴스검색 + 단축주소</title>
+</head>
+<body>
+    <h1>네이버 뉴스검색 + 단축주소</h1>
+    <form method="post">
+        <input name="query" value="{{ query or '' }}" required>
+        <button type="submit">검색</button>
+    </form>
+    {% if articles %}
+    <hr>
+    <ul>
+        {% for art in articles %}
+        <li>
+            <b>{{ art.title }}</b><br>
+            <a href="{{ art.url }}" target="_blank">{{ art.url }}</a>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</body>
+</html>
