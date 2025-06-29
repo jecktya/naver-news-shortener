@@ -1,6 +1,9 @@
-flask
+fastapi
+jinja2
+uvicorn
 requests
 beautifulsoup4
 feedparser
 langdetect
 playwright
+python-multipart
