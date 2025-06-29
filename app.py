@@ -1,23 +1,17 @@
 # -*- coding: utf-8 -*-
 
 from flask import Flask, request, jsonify
-import os
-import requests
-import urllib.parse
-import html
+import os, requests, html, urllib.parse, asyncio
 from datetime import datetime, timedelta, timezone
 import email.utils as eut
+from langdetect import detect
 from bs4 import BeautifulSoup
 import feedparser
-from langdetect import detect
-import asyncio
 from playwright.async_api import async_playwright
 
-# 환경변수에서 네이버 API 키 읽기
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID")
 NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
 
-# 언론사 매핑
 press_name_map = {
     "chosun.com": "조선일보", "yna.co.kr": "연합뉴스", "hani.co.kr": "한겨레",
     "joongang.co.kr": "중앙일보", "mbn.co.kr": "MBN", "kbs.co.kr": "KBS",
@@ -44,7 +38,7 @@ def convert_to_mobile_link(url):
         return url.replace("n.news.naver.com/article", "n.news.naver.com/mnews/article")
     return url
 
-def search_news(query, display=30):
+def search_news(query, display=10):
     enc = urllib.parse.quote(query)
     url = f"https://openapi.naver.com/v1/search/news.json?query={enc}&display={display}&sort=date"
     headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET}
@@ -60,12 +54,13 @@ def parse_pubdate(pubdate_str):
     except:
         return None
 
-# Playwright를 사용한 네이버 단축주소 자동화
+# Playwright로 네이버 단축주소 변환
 async def get_naver_short_url(long_url):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         await page.goto("https://me2.do/")
+        # 실제 네이버 단축주소 생성 페이지의 구조를 참고해서 수정 필요!
         await page.fill('input[type="text"]', long_url)
         await page.click('button[type="submit"]')
         await page.wait_for_selector('input[readonly]')
@@ -74,22 +69,23 @@ async def get_naver_short_url(long_url):
         return short_url
 
 def sync_get_naver_short_url(long_url):
-    return asyncio.run(get_naver_short_url(long_url))
+    try:
+        return asyncio.run(get_naver_short_url(long_url))
+    except Exception as e:
+        return f"생성실패: {e}"
 
 # Flask 앱
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Flask + Playwright 네이버 뉴스검색 + 단축주소 API"
+    return "Flask + Playwright 네이버 뉴스검색 및 단축주소 API 정상동작!"
 
 @app.route("/news", methods=["GET"])
 def news():
     query = request.args.get("query", "군대")
     search_mode = request.args.get("mode", "전체")  # 전체/동영상만/주요언론사만
     now = datetime.now(timezone(timedelta(hours=9)))
-
-    # 기본 키워드 목록 (파라미터 없으면)
     def_keywords = ["육군", "국방", "외교", "안보", "북한",
                     "신병교육대", "훈련", "간부", "장교",
                     "부사관", "병사", "용사", "군무원"]
@@ -100,7 +96,6 @@ def news():
         keyword_list = def_keywords
 
     url_map = {}
-
     for kw in keyword_list:
         items = search_news(kw)
         for a in items:
@@ -109,10 +104,8 @@ def news():
             url = a["link"]
             pub = parse_pubdate(a.get("pubDate", "")) or datetime.min.replace(tzinfo=timezone(timedelta(hours=9)))
             domain, press = extract_press_name(a.get("originallink") or url)
-            # 4시간 이내 뉴스만
             if not pub or (now - pub > timedelta(hours=4)):
                 continue
-            # 모드별 필터
             if search_mode == "주요언론사만" and press not in press_name_map.values():
                 continue
             if search_mode == "동영상만":
@@ -123,7 +116,6 @@ def news():
                 video_url = any(p in url for p in ["/v/", "/video/", "vid="])
                 if not (video_text or video_url):
                     continue
-            # 중복 URL 관리 및 키워드 매핑
             if url not in url_map:
                 url_map[url] = {
                     "title": title,
@@ -134,20 +126,15 @@ def news():
                 }
             else:
                 url_map[url]["matched"].add(kw)
-
     articles = []
     for v in url_map.values():
         v["matched"] = sorted(v["matched"])
-        # Playwright로 단축주소 생성 (오류시 원본 URL로 대체)
         try:
             v["short_url"] = sync_get_naver_short_url(v["url"])
         except Exception as e:
             v["short_url"] = v["url"]
         articles.append(v)
-    # 최신순 정렬
     sorted_list = sorted(articles, key=lambda x: x['pubdate'], reverse=True)
-
-    # 결과 출력
     output = []
     for art in sorted_list:
         output.append({
