@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import email.utils as eut
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
-
+st.write("🔍 st.secrets 내용:", dict(st.secrets))
 # NAVER API 키
 NAVER_CLIENT_ID = st.secrets.get("NAVER_CLIENT_ID")
 NAVER_CLIENT_SECRET = st.secrets.get("NAVER_CLIENT_SECRET")
