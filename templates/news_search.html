@@ -1,42 +1,72 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-    <title>뉴스검색기 - FastAPI+Jinja2+Playwright</title>
     <meta charset="utf-8">
+    <title>뉴스검색기</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; margin: 40px; background: #f6f8fa; }
-        .debug { background: #fff8c6; color: #222; padding: 8px 12px; border-radius: 6px; margin: 6px 0; font-size: 14px;}
-        .card { background: #fff; padding: 18px; margin-bottom: 14px; border-radius: 12px; box-shadow: 0 2px 12px #eee; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 40px; background: #f7f8fa; }
+        .debug { background: #fffbe6; color: #666; padding: 6px 12px; border-radius: 8px; margin: 8px 0; font-size: 14px;}
+        .card { background: #fff; padding: 18px; margin-bottom: 14px; border-radius: 14px; box-shadow: 0 2px 12px #ececec;}
+        .btn { padding:5px 12px; font-size:15px; margin: 0 4px;}
+        .small {font-size:13px;color:gray;}
     </style>
+    <script>
+        // 전체 선택/해제
+        function selectAll(val) {
+            document.querySelectorAll("input[name='selected']").forEach(chk=>{chk.checked=val;});
+        }
+        // 복사 기능
+        function copySelected() {
+            let arr = [];
+            document.querySelectorAll("input[name='selected']:checked").forEach(chk=>{
+                let t = chk.dataset.title, p = chk.dataset.press, u = chk.dataset.short;
+                arr.push(`■ ${t} (${p})\n${u}`);
+            });
+            let txt = arr.join('\n\n');
+            navigator.clipboard.writeText(txt);
+            alert("복사되었습니다!");
+        }
+    </script>
 </head>
 <body>
-    <h2>📰 뉴스검색기 <span style="font-size:14px;color:gray;">(FastAPI+Jinja2+Playwright)</span></h2>
+    <h2>📰 뉴스검색기 (FastAPI+Jinja2+Playwright)</h2>
     <form method="post">
-        <label>키워드 (쉼표로 구분):</label>
-        <input name="keywords" value="육군,국방,외교" style="width:350px;">
-        <button type="submit">검색</button>
+        <input name="keywords" value="{{keywords}}" style="width:320px;" placeholder="키워드(쉼표로 구분)">
+        <select name="search_mode">
+            <option value="전체" {% if search_mode=='전체' %}selected{% endif %}>전체</option>
+            <option value="동영상만" {% if search_mode=='동영상만' %}selected{% endif %}>동영상만</option>
+            <option value="주요언론사만" {% if search_mode=='주요언론사만' %}selected{% endif %}>주요언론사만</option>
+        </select>
+        <button type="submit" class="btn">🔍 뉴스 검색</button>
     </form>
-    <div>
-    {% if now %}<div style="color:gray;font-size:13px;">현재 시각: {{now}}</div>{% endif %}
+    {% if now %}<div class="small">🕒 현재 시각: {{now}} (4시간 이내 뉴스만 검색)</div>{% endif %}
     {% for msg in debug_msgs %}
-        <div class="debug">{{ msg }}</div>
+        <div class="debug">{{msg}}</div>
     {% endfor %}
-    </div>
     {% if results %}
-        <h4>검색결과 ({{results|length}}건)</h4>
+    <hr>
+    <form method="post" action="/download">
+        <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
+        <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
+        <button type="button" class="btn" onclick="copySelected()">📋 선택 복사</button>
+        <button type="submit" class="btn">📄 선택 다운로드</button>
+        <br><br>
         {% for art in results %}
-            <div class="card">
-                <b>{{art.title}}</b> ({{art.press}})
-                <div style="font-size:13px;color:gray;">
-                    🕒 {{art.pubdate.strftime("%Y-%m-%d %H:%M") if art.pubdate else ""}}
-                    | 키워드: {{art.matched|join(", ")}}
-                </div>
-                <div>
-                    <a href="{{art.short_url}}" target="_blank">{{art.short_url}}</a>
-                </div>
-                <div style="color:#666;">{{art.desc}}</div>
+        <div class="card">
+            <input type="checkbox" name="selected" value="{{art.url}}" checked 
+                data-title="{{art.title}}" data-press="{{art.press}}" data-short="{{art.short_url}}">
+            <b>{{art.title}}</b> ({{art.press}})
+            <span class="small">🕒 {{art.pubdate.strftime("%Y-%m-%d %H:%M")}} | 키워드: {{art.matched|join(", ")}}</span>
+            <div>
+                <a href="{{art.short_url}}" target="_blank">{{art.short_url}}</a>
             </div>
+            <input type="hidden" name="titles" value="{{art.title}}">
+            <input type="hidden" name="press" value="{{art.press}}">
+            <input type="hidden" name="urls" value="{{art.short_url}}">
+            <div class="small">{{art.desc}}</div>
+        </div>
         {% endfor %}
+    </form>
     {% endif %}
 </body>
 </html>
