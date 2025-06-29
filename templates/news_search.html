@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>📰 뉴스검색기 (FastAPI 버전)</title>
+    <title>📰 뉴스검색기 (FastAPI+Playwright)</title>
     <style>
         body { font-family: 'Malgun Gothic', sans-serif; background:#fcfcfc; margin:40px;}
         input[type=text], textarea { font-size:1.1em; padding:4px; border:1px solid #ccc; border-radius:5px;}
@@ -12,23 +12,25 @@
         .btn-selected { background:#4287f5; color:#fff;}
         .copytxt { width:100%; min-height:120px; font-size:1.05em; margin-top:10px; }
         .small { font-size:0.95em; color:gray;}
+        .failbox {color:#b00; font-size:0.97em; margin-top:8px;}
+        .keyword-badge {margin-right:4px; padding:2px 6px; background:#eee; border-radius:4px; font-size:0.96em;}
     </style>
     <script>
+    // 전체 선택/해제, 선택 복사 js
     function selectAll(val) {
         let cbs = document.querySelectorAll('input[name="selected_urls"]');
         cbs.forEach(cb => cb.checked = val);
         updateCopyArea();
     }
     function updateCopyArea() {
-        let cbs = document.querySelectorAll('input[name="selected_urls"]');
-        let result = [];
+        let cbs = document.querySelectorAll('input[name="selected_urls"]:checked');
+        let list = [];
         cbs.forEach(cb => {
-            if(cb.checked){
-                let block = document.getElementById("block_" + cb.value);
-                result.push(block.innerText);
-            }
+            let idx = cb.value;
+            let ta = document.getElementById("ta_" + idx);
+            if (ta) list.push(ta.value);
         });
-        document.getElementById("copy_area").value = result.join("\n\n");
+        document.getElementById("copy_area").value = list.join("\n\n");
     }
     function copyText() {
         let ta = document.getElementById("copy_area");
@@ -41,15 +43,14 @@
     <h2>📰 뉴스검색기 (FastAPI+Playwright)</h2>
     <form method="post">
         <label>키워드 입력 (쉼표로 구분):</label><br>
-        <input type="text" name="keywords" style="width:98%;" value="{{keywords}}" />
+        <input type="text" name="keywords" style="width:95%;" value="{{ keyword_input or default_keywords }}" />
         <span class="small">예: 육군, 국방, 외교, 신병, 교육대 ... (수정/추가/삭제 자유)</span><br>
         <input type="checkbox" name="checked_two_keywords" value="on" {% if checked_two_keywords %}checked{% endif %}> 2개 이상 키워드 포함만 보기
         &nbsp;&nbsp;
         <label>검색 대상:</label>
         <input type="radio" name="search_mode" value="major" {% if search_mode == "major" %}checked{% endif %}>주요언론사만
         <input type="radio" name="search_mode" value="all" {% if search_mode == "all" %}checked{% endif %}>전체
-        &nbsp;&nbsp;
-        <input type="checkbox" name="video_only" value="on" {% if video_only %}checked{% endif %}>동영상만
+        <input type="checkbox" name="video_only" value="on" {% if video_only %}checked{% endif %}> 동영상만
         &nbsp;&nbsp;
         <button type="submit" class="btn">🔍 뉴스 검색</button>
     </form>
@@ -57,43 +58,52 @@
     <div class="msg">{{msg}}</div>
     {% endif %}
     {% if final_results %}
-    <div style="margin-bottom:8px;">
-        <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
-        <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
-        <button type="button" class="btn" onclick="copyText()">📋 선택 복사</button>
-    </div>
-    <form method="post" action="/shorten" id="shorten_form">
-        <input type="hidden" name="keywords" value="{{keywords}}">
-        <input type="hidden" name="checked_two_keywords" value="{{'on' if checked_two_keywords else ''}}">
-        <input type="hidden" name="search_mode" value="{{search_mode}}">
-        <input type="hidden" name="video_only" value="{{'on' if video_only else ''}}">
-        <textarea name="copy_area" id="copy_area" class="copytxt" readonly onclick="this.select()">{% for a in final_results %}[{{a.press}}] {{a.title}}
-{{a.url}}{% if not loop.last %}
+    <div>
+        <div style="margin-top:10px;">
+            <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
+            <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
+        </div>
+        <form method="post" action="/shorten">
+            <input type="hidden" name="keywords" value="{{ keyword_input }}">
+            <input type="hidden" name="checked_two_keywords" value="{{'on' if checked_two_keywords else ''}}">
+            <input type="hidden" name="search_mode" value="{{ search_mode }}">
+            <input type="hidden" name="video_only" value="{{'on' if video_only else ''}}">
+            {% for idx, art in enumerate(final_results) %}
+                <div style="margin-top:15px;">
+                    <input type="checkbox" name="selected_urls" value="{{idx}}" class="checkbox" checked onclick="updateCopyArea()">
+                    <span>■ <b>{{art.title}}</b> ({{art.press}})</span>
+                    <span class="small">[{{art.pubdate}}]</span>
+                    <div style="color:gray; margin:2px 0 2px 0; font-size:0.97em;">
+                        키워드: 
+                        {% for kw, cnt in art.keywords %}
+                          <span class="keyword-badge">{{kw}}{% if cnt>1 %}({{cnt}}){% endif %}</span>
+                        {% endfor %}
+                    </div>
+                    <a href="{{art.url}}" target="_blank">[기사보기]</a>
+                    <textarea id="ta_{{idx}}" style="display:none;">■ {{art.title}} ({{art.press}})
+{{art.url}}</textarea>
+                </div>
+            {% endfor %}
+            <textarea id="copy_area" class="copytxt" readonly onclick="this.select()">{% for idx, art in enumerate(final_results) %}
+■ {{art.title}} ({{art.press}})
+{{art.url}}
 
-{% endif %}{% endfor %}</textarea>
-        {% for a in final_results %}
-        <div id="block_{{loop.index0}}">
-            <input type="checkbox" name="selected_urls" value="{{loop.index0}}" checked onclick="updateCopyArea()"> 
-            <b>[{{a.press}}]</b> {{a.title}} 
-            {% if a.matched_keywords %}
-                <span class="small">
-                {% for kw, cnt in a.matched_keywords %}{{kw}}({{cnt}}){% if not loop.last %}, {% endif %}{% endfor %}
-                </span>
-            {% endif %}
-            <br><span style="color:gray;font-size:0.97em;">{{a.pubdate}} | {{a.url}}</span>
-        </div>
-        {% endfor %}
-        <div style="margin-top:12px;">
-            <button type="submit" class="btn">🔗 주소변환 (선택된 기사만)</button>
-        </div>
-    </form>
+{% endfor %}</textarea>
+            <button type="button" class="btn" onclick="copyText()">📋 선택 복사</button>
+            <button type="submit" class="btn">🔗 선택 기사 주소 단축변환</button>
+        </form>
+    </div>
     {% endif %}
-    {% if fail_msgs %}
-    <div style="margin-top:20px;color:#c00;font-size:1.08em;">
-        <b>단축주소 변환 실패:</b><br>
-        {% for msg in fail_msgs %}
-            - {{msg}}<br>
-        {% endfor %}
+    {% if shortened %}
+    <div style="margin:15px 0 5px 0; color:green;">단축주소 변환 완료!</div>
+    <textarea class="copytxt" readonly onclick="this.select()">{{shortened}}</textarea>
+    {% endif %}
+    {% if shorten_fail %}
+    <div class="failbox">
+      <b>단축주소 변환 실패 목록:</b><br>
+      {% for f in shorten_fail %}
+        {{f}}<br>
+      {% endfor %}
     </div>
     {% endif %}
 </body>
