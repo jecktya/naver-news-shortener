@@ -1,48 +1,100 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-    <meta charset="utf-8">
-    <title>📰 뉴스검색기</title>
-    <style>body{font-family:'Malgun Gothic',sans-serif;}</style>
+    <meta charset="UTF-8">
+    <title>📰 뉴스검색기 (FastAPI 버전)</title>
+    <style>
+        body { font-family: 'Malgun Gothic', sans-serif; background:#fcfcfc; margin:40px;}
+        input[type=text], textarea { font-size:1.1em; padding:4px; border:1px solid #ccc; border-radius:5px;}
+        .msg { color:#4287f5; font-size:1.08em; margin-bottom:10px;}
+        .checkbox { margin-right:5px; }
+        .btn { font-size:1em; padding:3px 10px; border-radius:4px; border:1px solid #bbb; margin:2px 3px; background:#e7e7ef; cursor:pointer;}
+        .btn-selected { background:#4287f5; color:#fff;}
+        .copytxt { width:100%; min-height:120px; font-size:1.05em; margin-top:10px; }
+        .small { font-size:0.95em; color:gray;}
+    </style>
     <script>
-      function selectAll(val){
-        document.querySelectorAll('input[name="selected_urls"]').forEach(cb=>cb.checked=val);
-        document.getElementById('form').submit(); // 실시간 반영 (or ajax)
-      }
-      function copyText(){
-        let ta=document.getElementById("copy_area");
-        ta.select();document.execCommand("copy");alert("복사완료");
-      }
+    function selectAll(val) {
+        let cbs = document.querySelectorAll('input[name="selected_urls"]');
+        cbs.forEach(cb => cb.checked = val);
+        updateCopyArea();
+    }
+    function updateCopyArea() {
+        let cbs = document.querySelectorAll('input[name="selected_urls"]');
+        let result = [];
+        cbs.forEach(cb => {
+            if(cb.checked){
+                let block = document.getElementById("block_" + cb.value);
+                result.push(block.innerText);
+            }
+        });
+        document.getElementById("copy_area").value = result.join("\n\n");
+    }
+    function copyText() {
+        let ta = document.getElementById("copy_area");
+        ta.select(); document.execCommand("copy");
+        alert("복사 완료!");
+    }
     </script>
 </head>
 <body>
-<h2>📰 뉴스검색기 (FastAPI+Playwright)</h2>
-<form method="post" id="form">
-  <input type="text" name="keywords" value="{{keywords}}" style="width:90%">
-  <input type="checkbox" name="checked_two_keywords" {% if checked_two_keywords %}checked{% endif %}> 2개 이상 키워드
-  <input type="radio" name="search_mode" value="major" {% if search_mode == "major" %}checked{% endif %}>주요언론사만
-  <input type="radio" name="search_mode" value="all" {% if search_mode == "all" %}checked{% endif %}>전체
-  <button type="submit">🔍 뉴스 검색</button>
-</form>
-{% if final_results %}
-  <button type="button" onclick="selectAll(true)">✅ 전체선택</button>
-  <button type="button" onclick="selectAll(false)">❌ 전체해제</button>
-  <button type="button" onclick="copyText()">📋 선택복사</button>
-  <form method="post" action="/shorten">
-    {% for n in final_results %}
-      <input type="checkbox" name="selected_urls" value="{{n.url}}" checked> [{{n.press}}] {{n.title}} ({{n.kw_count}})
-      <br>
-    {% endfor %}
-    <textarea id="copy_area" rows="10" style="width:100%">{{copy_area}}</textarea>
-    <button type="submit">주소변환</button>
-  </form>
-{% endif %}
-{% if failures %}
-  <div style="color:red">
-    {% for fail in failures %}
-      {{fail}}<br>
-    {% endfor %}
-  </div>
-{% endif %}
+    <h2>📰 뉴스검색기 (FastAPI+Playwright)</h2>
+    <form method="post">
+        <label>키워드 입력 (쉼표로 구분):</label><br>
+        <input type="text" name="keywords" style="width:98%;" value="{{keywords}}" />
+        <span class="small">예: 육군, 국방, 외교, 신병, 교육대 ... (수정/추가/삭제 자유)</span><br>
+        <input type="checkbox" name="checked_two_keywords" value="on" {% if checked_two_keywords %}checked{% endif %}> 2개 이상 키워드 포함만 보기
+        &nbsp;&nbsp;
+        <label>검색 대상:</label>
+        <input type="radio" name="search_mode" value="major" {% if search_mode == "major" %}checked{% endif %}>주요언론사만
+        <input type="radio" name="search_mode" value="all" {% if search_mode == "all" %}checked{% endif %}>전체
+        &nbsp;&nbsp;
+        <input type="checkbox" name="video_only" value="on" {% if video_only %}checked{% endif %}>동영상만
+        &nbsp;&nbsp;
+        <button type="submit" class="btn">🔍 뉴스 검색</button>
+    </form>
+    {% if msg %}
+    <div class="msg">{{msg}}</div>
+    {% endif %}
+    {% if final_results %}
+    <div style="margin-bottom:8px;">
+        <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
+        <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
+        <button type="button" class="btn" onclick="copyText()">📋 선택 복사</button>
+    </div>
+    <form method="post" action="/shorten" id="shorten_form">
+        <input type="hidden" name="keywords" value="{{keywords}}">
+        <input type="hidden" name="checked_two_keywords" value="{{'on' if checked_two_keywords else ''}}">
+        <input type="hidden" name="search_mode" value="{{search_mode}}">
+        <input type="hidden" name="video_only" value="{{'on' if video_only else ''}}">
+        <textarea name="copy_area" id="copy_area" class="copytxt" readonly onclick="this.select()">{% for a in final_results %}[{{a.press}}] {{a.title}}
+{{a.url}}{% if not loop.last %}
+
+{% endif %}{% endfor %}</textarea>
+        {% for a in final_results %}
+        <div id="block_{{loop.index0}}">
+            <input type="checkbox" name="selected_urls" value="{{loop.index0}}" checked onclick="updateCopyArea()"> 
+            <b>[{{a.press}}]</b> {{a.title}} 
+            {% if a.matched_keywords %}
+                <span class="small">
+                {% for kw, cnt in a.matched_keywords %}{{kw}}({{cnt}}){% if not loop.last %}, {% endif %}{% endfor %}
+                </span>
+            {% endif %}
+            <br><span style="color:gray;font-size:0.97em;">{{a.pubdate}} | {{a.url}}</span>
+        </div>
+        {% endfor %}
+        <div style="margin-top:12px;">
+            <button type="submit" class="btn">🔗 주소변환 (선택된 기사만)</button>
+        </div>
+    </form>
+    {% endif %}
+    {% if fail_msgs %}
+    <div style="margin-top:20px;color:#c00;font-size:1.08em;">
+        <b>단축주소 변환 실패:</b><br>
+        {% for msg in fail_msgs %}
+            - {{msg}}<br>
+        {% endfor %}
+    </div>
+    {% endif %}
 </body>
 </html>
