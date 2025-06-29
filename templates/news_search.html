@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>📰 뉴스검색기 (FastAPI 버전)</title>
+    <title>📰 뉴스검색기 (FastAPI+Playwright)</title>
     <style>
         body { font-family: 'Malgun Gothic', sans-serif; background:#fcfcfc; margin:40px;}
         input[type=text], textarea { font-size:1.1em; padding:4px; border:1px solid #ccc; border-radius:5px;}
@@ -12,78 +12,37 @@
         .btn-selected { background:#4287f5; color:#fff;}
         .copytxt { width:100%; min-height:120px; font-size:1.05em; margin-top:10px; }
         .small { font-size:0.95em; color:gray;}
+        .nowrap {white-space: pre-line;}
     </style>
     <script>
-    // 전체 선택/해제, 선택 복사 js
-    function selectAll(val) {
-        let cbs = document.querySelectorAll('input[name="selected_urls"]');
-        cbs.forEach(cb => {cb.checked = val;});
-        updateCopyArea();
-    }
-    function updateCopyArea() {
-        let lines = [];
-        document.querySelectorAll('input[name="selected_urls"]:checked').forEach(cb => {
-            let idx = cb.value;
-            let title = document.getElementById("title_" + idx).textContent;
-            let press = document.getElementById("press_" + idx).textContent;
-            let url = document.getElementById("url_" + idx).textContent;
-            lines.push(`[${press}] ${title}\n${url}`);
-        });
-        document.getElementById("copy_area").value = lines.join("\n\n");
-    }
-    function copyText() {
-        let ta = document.getElementById("copy_area");
-        ta.select(); document.execCommand("copy");
-        alert("복사 완료!");
-    }
-    async function convertShortUrls() {
-        let checked = [];
-        document.querySelectorAll('input[name="selected_urls"]:checked').forEach(cb => {
-            let idx = cb.value;
-            let url = document.getElementById("url_" + idx).textContent;
-            if(url.startsWith("https://n.news.naver.com/")) checked.push(url);
-        });
-        if(checked.length === 0){
-            alert("변환할 네이버뉴스 주소가 없습니다.");
-            return;
+        function selectAll(val) {
+            let cbs = document.querySelectorAll('input[name="selected_urls"]');
+            cbs.forEach(cb => cb.checked = val);
+            document.getElementById('result_form').submit();
         }
-        document.getElementById("shorten_btn").disabled = true;
-        document.getElementById("shorten_btn").textContent = "변환중...";
-        let resp = await fetch("/shorten", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({"urls": checked})
-        });
-        let data = await resp.json();
-        let result = data.result;
-        let fail = data.fail;
-        // 주소 변환
-        let lines = [];
-        let fail_lines = [];
-        document.querySelectorAll('input[name="selected_urls"]:checked').forEach(cb => {
-            let idx = cb.value;
-            let title = document.getElementById("title_" + idx).textContent;
-            let press = document.getElementById("press_" + idx).textContent;
-            let url = document.getElementById("url_" + idx).textContent;
-            let replaced_url = result[url] ? result[url] : url;
-            lines.push(`[${press}] ${title}\n${replaced_url}`);
-            if(fail[url]){
-                fail_lines.push(`${title}: ${fail[url]}`);
+        function updateCopyArea() {
+            let cbs = document.querySelectorAll('input[name="selected_urls"]');
+            let lines = [];
+            for (let cb of cbs) {
+                if (cb.checked) {
+                    let idx = cb.getAttribute("data-idx");
+                    lines.push(document.getElementById("copy_line_" + idx).value);
+                }
             }
-        });
-        document.getElementById("copy_area").value = lines.join("\n\n");
-        document.getElementById("fail_area").innerHTML = fail_lines.length > 0 ? "<b>🔴 변환 실패:</b><br>" + fail_lines.join("<br>") : "";
-        document.getElementById("shorten_btn").disabled = false;
-        document.getElementById("shorten_btn").textContent = "주소변환";
-    }
-    window.onload = function(){updateCopyArea();};
+            document.getElementById("copy_area").value = lines.join("\n\n");
+        }
+        function copyText() {
+            let ta = document.getElementById("copy_area");
+            ta.select(); document.execCommand("copy");
+            alert("복사 완료!");
+        }
     </script>
 </head>
 <body>
     <h2>📰 뉴스검색기 (FastAPI+Playwright)</h2>
     <form method="post">
         <label>키워드 입력 (쉼표로 구분):</label><br>
-        <input type="text" name="keywords" style="width:98%;" value="{{default_keywords}}" />
+        <input type="text" name="keywords" style="width:600px;" value="{{default_keywords}}" />
         <span class="small">예: 육군, 국방, 외교, 신병, 교육대 ... (수정/추가/삭제 자유)</span><br>
         <input type="checkbox" name="checked_two_keywords" value="on" {% if checked_two_keywords %}checked{% endif %}> 2개 이상 키워드 포함만 보기
         &nbsp;&nbsp;
@@ -93,38 +52,47 @@
         &nbsp;&nbsp;
         <button type="submit" class="btn">🔍 뉴스 검색</button>
     </form>
+    <div class="small">🕒 현재 시각: {{now}} (4시간 이내 뉴스만 검색)</div>
     {% if msg %}
     <div class="msg">{{msg}}</div>
     {% endif %}
+
     {% if final_results %}
-    <div style="margin:12px 0;">
-        <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
-        <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
-        <button type="button" class="btn" onclick="copyText()">📋 선택 복사</button>
-    </div>
-    <form>
-    <table border="0" cellpadding="6" width="99%">
-    {% for a in final_results %}
-        <tr>
-            <td width="3%" align="center">
-                <input type="checkbox" name="selected_urls" value="{{loop.index0}}" checked onchange="updateCopyArea()">
-            </td>
-            <td>
-                <span id="title_{{loop.index0}}">{{a.title}}</span>
-                (<span id="press_{{loop.index0}}">{{a.press}}</span>)
-                <br><span style="color:#888; font-size:0.95em;">🕒 {{a.pubdate_str}}</span>
-                <br><span class="small">키워드: {{a.matched_str}}</span>
-                <span id="url_{{loop.index0}}" style="display:none;">{{a.url}}</span>
-            </td>
-        </tr>
-    {% endfor %}
-    </table>
+    <form method="post" action="/shorten" id="result_form">
+        <input type="hidden" name="keywords" value="{{default_keywords}}">
+        <input type="hidden" name="checked_two_keywords" value="{{'on' if checked_two_keywords else ''}}">
+        <input type="hidden" name="search_mode" value="{{search_mode}}">
+        <div>
+            <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
+            <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
+            <button type="button" class="btn" onclick="copyText()">📋 선택 복사</button>
+        </div>
+        <ul>
+            {% for r in final_results %}
+            <li style="margin-bottom:10px;">
+                <input type="checkbox" name="selected_urls" value="{{r.url}}" class="checkbox" data-idx="{{loop.index0}}" checked onchange="updateCopyArea()">
+                <span>■ {{r.title}} ({{r.press}})
+                {% if r.matched_str %}<span class="small">키워드: {{r.matched_str}}</span>{% endif %}
+                <br><a href="{{r.url}}" target="_blank">{{r.url}}</a>
+                </span>
+                <input type="hidden" id="copy_line_{{loop.index0}}" value="■ {{r.title}} ({{r.press}})\n{{r.url}}">
+            </li>
+            {% endfor %}
+        </ul>
+        <textarea name="copy_text" id="copy_area" class="copytxt nowrap" readonly>
+{% for r in final_results %}■ {{r.title}} ({{r.press}})
+{{r.url}}
+{% if not loop.last %}
+
+{% endif %}{% endfor %}
+        </textarea>
+        <div>
+            <button type="submit" class="btn">🔗 선택 주소 단축</button>
+        </div>
     </form>
-    <textarea id="copy_area" class="copytxt" readonly></textarea>
-    <div style="margin:12px 0;">
-        <button id="shorten_btn" type="button" class="btn" onclick="convertShortUrls()">주소변환</button>
-        <div id="fail_area" style="margin-top:6px; color:#d43f3a;"></div>
-    </div>
     {% endif %}
-</body>
-</html>
+
+    {% if copy_text and not final_results %}
+    <form method="post" action="/shorten">
+        <input type="hidden" name="keywords" value="{{default_keywords}}">
+        <input type="hidden" name="checked_two_keywords" value="{{'on' if checked_two_keywords
