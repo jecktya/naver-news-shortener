@@ -1,83 +1,83 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-    <meta charset="utf-8">
-    <title>뉴스검색기</title>
+    <meta charset="UTF-8">
+    <title>📰 뉴스검색기</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; margin: 40px; background: #f7f8fa; }
-        .debug { background: #fffbe6; color: #666; padding: 6px 12px; border-radius: 8px; margin: 8px 0; font-size: 14px;}
-        .card { background: #fff; padding: 18px; margin-bottom: 14px; border-radius: 14px; box-shadow: 0 2px 12px #ececec;}
-        .btn { padding:5px 12px; font-size:15px; margin: 0 4px;}
-        .small {font-size:13px;color:gray;}
-        textarea { width:98%; font-size:15px; margin-top:10px; border-radius:8px; }
+        body { font-family: "맑은 고딕", "Malgun Gothic", Arial, sans-serif; margin:30px;}
+        .btn { margin:3px; padding: 6px 12px; border-radius:6px; border:1px solid #ddd; background:#f3f3f3; cursor:pointer; }
+        .article-block { border-bottom:1px solid #eee; margin:10px 0; padding:10px 0; }
+        .gray { color:gray; font-size:13px;}
+        .textarea { width:100%; min-height:150px;}
     </style>
-    <script>
-        // 전체 선택/해제
-        function selectAll(val) {
-            document.querySelectorAll("input[name='selected']").forEach(chk=>{chk.checked=val;});
-            updateFinalText();
-        }
-        // 복사 기능
-        function copySelected() {
-            let arr = [];
-            document.querySelectorAll("input[name='selected']:checked").forEach(chk=>{
-                let t = chk.dataset.title, p = chk.dataset.press, u = chk.dataset.short;
-                arr.push(`■ ${t} (${p})\n${u}`);
-            });
-            let txt = arr.join('\n\n');
-            navigator.clipboard.writeText(txt);
-            alert("복사되었습니다!");
-        }
-        function updateFinalText() {
-            let arr = [];
-            document.querySelectorAll("input[name='selected']:checked").forEach(chk=>{
-                let t = chk.dataset.title, p = chk.dataset.press, u = chk.dataset.short;
-                arr.push(`■ ${t} (${p})\n${u}`);
-            });
-            document.getElementById('final_txt').value = arr.join('\n\n');
-        }
-    </script>
 </head>
 <body>
-    <h2>📰 뉴스검색기 (FastAPI+Jinja2+Playwright)</h2>
-    <form method="post">
-        <input name="keywords" value="{{keywords}}" style="width:420px;" placeholder="키워드(쉼표로 구분)">
-        <select name="search_mode">
-            <option value="전체" {% if search_mode=='전체' %}selected{% endif %}>전체</option>
-            <option value="동영상만" {% if search_mode=='동영상만' %}selected{% endif %}>동영상만</option>
-            <option value="주요언론사만" {% if search_mode=='주요언론사만' %}selected{% endif %}>주요언론사만</option>
-        </select>
-        <button type="submit" class="btn">🔍 뉴스 검색</button>
+    <h2>📰 뉴스검색기</h2>
+    <form method="post" action="/search">
+        <label>🔍 키워드 입력 (쉼표로 구분):</label>
+        <input type="text" name="keywords" value="{{keywords}}">
+        <label>
+            <input type="radio" name="search_mode" value="전체" {% if search_mode=="전체" %}checked{% endif %}> 전체
+        </label>
+        <label>
+            <input type="radio" name="search_mode" value="동영상만" {% if search_mode=="동영상만" %}checked{% endif %}> 동영상만
+        </label>
+        <label>
+            <input type="radio" name="search_mode" value="주요언론사만" {% if search_mode=="주요언론사만" %}checked{% endif %}> 주요언론사만
+        </label>
+        <button class="btn" type="submit">🔍 뉴스 검색</button>
+        <span class="gray">🕒 현재 시각: {{now}}</span>
     </form>
-    {% if now %}<div class="small">🕒 현재 시각: {{now}} (4시간 이내 뉴스만 검색)</div>{% endif %}
-    {% for msg in debug_msgs %}
-        <div class="debug">{{msg}}</div>
-    {% endfor %}
-    {% if results %}
-    <hr>
-    <div>
-        <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
-        <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
-        <button type="button" class="btn" onclick="copySelected()">📋 선택 복사</button>
-    </div>
-    <form method="post" action="/download" onsubmit="return true;">
-        {% for art in results %}
-        <div class="card">
-            <input type="checkbox" name="selected" value="{{art.url}}" checked 
-                data-title="{{art.title}}" data-press="{{art.press}}" data-short="{{art.short_url}}" onclick="updateFinalText()">
-            <b>{{art.title}}</b> ({{art.press}})
-            <span class="small">🕒 {{art.pubdate.strftime("%Y-%m-%d %H:%M")}} | 키워드: {{art.matched|join(", ")}}</span>
-            <div>
-                <a href="{{art.short_url}}" target="_blank">{{art.short_url}}</a>
-            </div>
-            <div class="small">{{art.desc}}</div>
+    {% if debug_msgs %}
+        <div style="color:tomato;">
+            {% for msg in debug_msgs %}
+                <div>{{msg}}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    <form id="shorten-form" method="post" action="/shorten">
+        <input type="hidden" id="shorten_urls" name="urls">
+        <input type="hidden" id="shorten_presses" name="presses">
+        <input type="hidden" name="keywords" value="{{keywords}}">
+        <input type="hidden" name="search_mode" value="{{search_mode}}">
+        <div>
+            <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
+            <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
+            <button type="submit" class="btn">📑 주소 요약하기</button>
+        </div>
+        {% for a in results %}
+        <div class="article-block">
+            <label>
+                <input type="checkbox" name="selected" value="{{a.url}}" data-press="{{a.press}}" checked>
+                <b>{{a.title}}</b> <span class="gray">({{a.press}})</span>
+            </label>
+            <div class="gray">🕒 {{a.pubdate.strftime('%Y-%m-%d %H:%M')}} | 키워드: {{a.matched|join(', ')}}</div>
+            <a href="{{a.url}}" target="_blank">📎 기사 바로보기</a>
         </div>
         {% endfor %}
-        <textarea id="final_txt" name="final_txt" rows="8" readonly>{{final_txt}}</textarea>
-        <br>
-        <button type="submit" class="btn">📄 선택 다운로드</button>
+        <div>
+            <textarea class="textarea" id="final_txt" readonly placeholder="최종 결과">{{final_txt}}</textarea>
+        </div>
+        {% if short_urls %}
+            <h3>단축주소 결과</h3>
+            <textarea rows="8" style="width:100%;">{{short_urls|join('\n')}}</textarea>
+        {% endif %}
     </form>
-    <script>updateFinalText();</script>
-    {% endif %}
+    <script>
+        function selectAll(flag){
+            document.querySelectorAll("input[name='selected']").forEach(chk=>chk.checked=flag);
+        }
+        document.getElementById("shorten-form").onsubmit = function() {
+            let urls = [];
+            let presses = [];
+            document.querySelectorAll("input[name='selected']:checked").forEach(chk=>{
+                urls.push(chk.value);
+                presses.push(chk.dataset.press);
+            });
+            document.getElementById('shorten_urls').value = urls.join(',');
+            document.getElementById('shorten_presses').value = presses.join(',');
+            return true;
+        }
+    </script>
 </body>
 </html>
