@@ -8,3 +8,4 @@ langdetect
 playwright
 python-multipart
 httpx
+itsdangerous
