@@ -1,20 +1,19 @@
+# -*- coding: utf-8 -*-
 import os
-import urllib.parse, html, email.utils as eut
-from datetime import datetime, timedelta, timezone
-
-from fastapi import FastAPI, Request, Form, Response
-from fastapi.responses import HTMLResponse, StreamingResponse
-from fastapi.templating import Jinja2Templates
-
+import html
+import urllib.parse
 import requests
-import asyncio
+from datetime import datetime, timedelta, timezone
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from playwright.async_api import async_playwright
-
-app = FastAPI()
-templates = Jinja2Templates(directory="templates")
 
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID")
 NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
+
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
 
 press_name_map = {
     "chosun.com": "조선일보", "yna.co.kr": "연합뉴스", "hani.co.kr": "한겨레",
@@ -37,146 +36,176 @@ def extract_press_name(url):
     except Exception:
         return None, None
 
+def search_news(query):
+    enc = urllib.parse.quote(query)
+    url = f"https://openapi.naver.com/v1/search/news.json?query={enc}&display=30&sort=date"
+    headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET}
+    r = requests.get(url, headers=headers)
+    if r.status_code == 200:
+        return r.json().get("items", [])
+    return []
+
 def parse_pubdate(pubdate_str):
+    import email.utils as eut
     try:
         dt = datetime(*eut.parsedate(pubdate_str)[:6], tzinfo=timezone(timedelta(hours=9)))
         return dt
     except:
         return None
 
-async def get_short_url(long_url, debug_msgs):
-    # 실제 서비스에 맞게 단축주소 자동화 코드로 변경 필요!
+def get_share_button_selector(press):
+    selector_map = {
+        "조선일보": 'button[aria-label="공유"]',
+        "연합뉴스": 'button[aria-label="공유"]',
+        "한겨레": 'button[aria-label="공유"]',
+        "중앙일보": 'button[aria-label="공유"]',
+        "동아일보": 'button[aria-label="공유"]',
+        "세계일보": 'button[aria-label="공유"]',
+        "문화일보": 'button[aria-label="공유"]',
+        "뉴시스": 'button[aria-label="공유"]',
+        "네이버": 'button[aria-label="공유"]',
+        "다음": 'button[aria-label="공유"]',
+        "국민일보": 'button[aria-label="공유"]',
+        "국방일보": 'button[aria-label="공유"]',
+        "이데일리": 'button[aria-label="공유"]',
+        "뉴스1": 'button[aria-label="공유"]',
+        "JTBC": 'button[aria-label="공유"]',
+        # 필요시 추가
+    }
+    return selector_map.get(press, 'button[aria-label="공유"]')
+
+async def get_mobile_naverme_url(url, press_name, debug_msgs):
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            await page.goto("https://me2.do/")  # 예시, 실제 네이버 단축주소 사이트로 바꿔야 함
-            # 실제 네이버 단축주소 발급 자동화 코드 필요
-            short_url = long_url  # (테스트시 long_url 그대로 사용)
+            iphone = p.devices['iPhone 12']
+            browser = await p.webkit.launch(headless=True)
+            context = await browser.new_context(**iphone)
+            page = await context.new_page()
+            await page.goto(url)
+            share_selector = get_share_button_selector(press_name)
+            await page.click(share_selector, timeout=5000)
+            # 공유창 뜨면 '링크 복사' 또는 단축주소 나타나는 input selector도 조사 필요!
+            # 아래는 예시 (수정 필요)
+            # await page.click('text=링크 복사')
+            # short_url = await page.evaluate('navigator.clipboard.readText()')
+            # 또는 화면에 표시된 naver.me 링크 추출
+            short_url = None
+            try:
+                await page.wait_for_selector('input[type="text"]', timeout=3000)
+                short_url = await page.input_value('input[type="text"]')
+            except Exception:
+                pass
             await browser.close()
-        debug_msgs.append(f"Playwright: {long_url} → {short_url}")
-        return short_url
+            if short_url and short_url.startswith('https://naver.me/'):
+                return short_url
+            else:
+                debug_msgs.append(f"[{url}] 단축주소 추출 실패, 원본주소 반환")
+                return url
     except Exception as e:
-        debug_msgs.append(f"Playwright 오류: {e}")
-        return long_url
-
-DEFAULT_KEYWORDS = "육군, 국방, 외교, 안보, 북한, 신병교육대, 훈련, 간부, 장교, 부사관, 병사, 용사, 군무원"
+        debug_msgs.append(f"[{url}] Playwright 오류: {e}")
+        return url
 
 @app.get("/", response_class=HTMLResponse)
-async def get_form(request: Request):
-    now = datetime.now(timezone(timedelta(hours=9)))
+async def main(request: Request):
+    default_keywords = ["육군", "국방", "외교", "안보", "북한",
+                "신병교육대", "훈련", "간부", "장교",
+                "부사관", "병사", "용사", "군무원"]
     return templates.TemplateResponse("news_search.html", {
         "request": request,
         "results": [],
         "selected": [],
-        "search_mode": "주요언론사만",   # 기본값 주요언론사만
-        "keywords": DEFAULT_KEYWORDS,
+        "search_mode": "주요언론사만",
+        "keywords": ", ".join(default_keywords),
+        "now": datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M"),
+        "final_txt": "",
+        "short_urls": [],
         "debug_msgs": [],
-        "now": now.strftime("%Y-%m-%d %H:%M"),
-        "final_txt": ""
     })
 
-@app.post("/", response_class=HTMLResponse)
-async def post_search(
-    request: Request,
-    keywords: str = Form(...),
-    search_mode: str = Form("주요언론사만"),
-    selected: list = Form(None)
-):
+@app.post("/search", response_class=HTMLResponse)
+async def search(request: Request, keywords: str = Form(...), search_mode: str = Form(...)):
     debug_msgs = []
-    now = datetime.now(timezone(timedelta(hours=9)))
-    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
-        debug_msgs.append("❗ 네이버 API 키 환경변수 미설정")
-        return templates.TemplateResponse("news_search.html", {
-            "request": request, "results": [], "selected": [],
-            "search_mode": search_mode, "keywords": keywords,
-            "debug_msgs": debug_msgs, "now": now.strftime("%Y-%m-%d %H:%M"), "final_txt": ""
-        })
-
-    # 키워드 리스트 생성
     keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
+    now = datetime.now(timezone(timedelta(hours=9)))
     url_map = {}
     for kw in keyword_list:
-        enc = urllib.parse.quote(kw)
-        url = f"https://openapi.naver.com/v1/search/news.json?query={enc}&display=30&sort=date"
-        headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET}
-        try:
-            r = requests.get(url, headers=headers)
-            if r.status_code == 200:
-                items = r.json().get("items", [])
-                for a in items:
-                    title = html.unescape(a["title"]).replace("<b>", "").replace("</b>", "")
-                    desc = html.unescape(a.get("description", "")).replace("<b>", "").replace("</b>", "")
-                    urlx = a["link"]
-                    pub = parse_pubdate(a.get("pubDate", "")) or datetime.min.replace(tzinfo=timezone(timedelta(hours=9)))
-                    domain, press = extract_press_name(a.get("originallink") or urlx)
-
-                    # 4시간 필터
-                    if not pub or (now - pub > timedelta(hours=4)):
-                        continue
-                    # 주요언론 모드
-                    if search_mode == "주요언론사만" and press not in press_name_map.values():
-                        continue
-                    # 동영상 모드
-                    if search_mode == "동영상만":
-                        video_keys = ["영상", "동영상", "영상보기", "보러가기", "뉴스영상", "영상뉴스", "클릭하세요", "바로보기"]
-                        video_text = any(k in desc for k in video_keys) or any(k in title for k in video_keys)
-                        video_url = any(p in urlx for p in ["/v/", "/video/", "vid="])
-                        if not (video_text or video_url):
-                            continue
-
-                    # 중복 URL 관리 및 키워드 매핑
-                    if urlx not in url_map:
-                        url_map[urlx] = {
-                            "title": title,
-                            "desc": desc,
-                            "url": urlx,
-                            "press": press,
-                            "pubdate": pub,
-                            "matched": set([kw]),
-                        }
-                    else:
-                        url_map[urlx]["matched"].add(kw)
+        items = search_news(kw)
+        for a in items:
+            title = html.unescape(a["title"]).replace("<b>", "").replace("</b>", "")
+            desc = html.unescape(a.get("description", "")).replace("<b>", "").replace("</b>", "")
+            url = a["link"]
+            pub = parse_pubdate(a.get("pubDate", "")) or datetime.min.replace(tzinfo=timezone(timedelta(hours=9)))
+            domain, press = extract_press_name(a.get("originallink") or url)
+            if not pub or (now - pub > timedelta(hours=4)):
+                continue
+            if search_mode == "주요언론사만" and press not in press_name_map.values():
+                continue
+            if search_mode == "동영상만":
+                video_keys = ["영상", "동영상", "영상보기", "보러가기", "뉴스영상", "영상뉴스", "클릭하세요", "바로보기"]
+                video_text = any(k in desc for k in video_keys) or any(k in title for k in video_keys)
+                video_url = any(p in url for p in ["/v/", "/video/", "vid="])
+                if not (video_text or video_url):
+                    continue
+            if url not in url_map:
+                url_map[url] = {
+                    "title": title,
+                    "url": url,
+                    "press": press,
+                    "pubdate": pub,
+                    "matched": set([kw])
+                }
             else:
-                debug_msgs.append(f"API({kw}) 오류: {r.status_code} {r.text}")
-        except Exception as e:
-            debug_msgs.append(f"API({kw}) 요청 예외: {e}")
-
+                url_map[url]["matched"].add(kw)
     articles = []
     for v in url_map.values():
         v["matched"] = sorted(v["matched"])
         articles.append(v)
-    articles = sorted(articles, key=lambda x: x['pubdate'], reverse=True)
-
-    # 모든 기사 url 단축주소화 (실제 구현시 병렬처리 권장)
-    for art in articles:
-        art["short_url"] = await get_short_url(art["url"], debug_msgs)
-
-    # 선택된 기사만 텍스트 생성
-    selected_keys = selected or [a["url"] for a in articles]
-    final_txt = "\n\n".join([
-        f"■ {a['title']} ({a['press']})\n{a['short_url']}"
-        for a in articles if a["url"] in selected_keys
-    ])
-
+    sorted_list = sorted(articles, key=lambda x: x['pubdate'], reverse=True)
+    final_txt = "\n\n".join(
+        [f"■ {a['title']} ({a['press']})\n{a['url']}" for a in sorted_list]
+    )
     return templates.TemplateResponse("news_search.html", {
         "request": request,
-        "results": articles,
-        "selected": selected_keys,
+        "results": sorted_list,
+        "selected": [a['url'] for a in sorted_list],
         "search_mode": search_mode,
         "keywords": keywords,
-        "debug_msgs": debug_msgs,
         "now": now.strftime("%Y-%m-%d %H:%M"),
-        "final_txt": final_txt
+        "final_txt": final_txt,
+        "short_urls": [],
+        "debug_msgs": debug_msgs,
     })
 
-@app.post("/download", response_class=Response)
-async def download_news(
-    request: Request,
-    final_txt: str = Form(...)
-):
-    return StreamingResponse(
-        iter([final_txt]), 
-        media_type="text/plain", 
-        headers={"Content-Disposition": "attachment; filename=news.txt"}
-    )
+@app.post("/shorten", response_class=HTMLResponse)
+async def shorten_urls(request: Request, urls: str = Form(...), presses: str = Form(...), keywords: str = Form(...), search_mode: str = Form(...)):
+    url_list = [u.strip() for u in urls.split(',') if u.strip()]
+    press_list = [p.strip() for p in presses.split(',') if p.strip()]
+    debug_msgs = []
+    short_urls = []
+    for u, p in zip(url_list, press_list):
+        short = await get_mobile_naverme_url(u, p, debug_msgs)
+        short_urls.append(short)
+    final_txt = "\n\n".join([f"{u} => {s}" for u, s in zip(url_list, short_urls)])
+    # 다시 검색 결과 리스트도 같이 출력 (사용자 UX 위해)
+    now = datetime.now(timezone(timedelta(hours=9)))
+    results = []
+    for url, press in zip(url_list, press_list):
+        title = url  # 간략하게 처리(생략), 실제로는 기사 데이터도 전달해야 UX가 좋음
+        results.append({
+            "title": title,
+            "url": url,
+            "press": press,
+            "pubdate": now,
+            "matched": [],
+        })
+    return templates.TemplateResponse("news_search.html", {
+        "request": request,
+        "results": results,
+        "selected": url_list,
+        "search_mode": search_mode,
+        "keywords": keywords,
+        "now": now.strftime("%Y-%m-%d %H:%M"),
+        "final_txt": final_txt,
+        "short_urls": short_urls,
+        "debug_msgs": debug_msgs,
+    })
