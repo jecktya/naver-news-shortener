@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from flask import Flask, request, jsonify
 import os
 import requests
@@ -11,64 +13,152 @@ from langdetect import detect
 import asyncio
 from playwright.async_api import async_playwright
 
-app = Flask(__name__)
-
+# 환경변수에서 네이버 API 키 읽기
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID")
 NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
 
-# Playwright로 naver.me 단축주소 받아오기 예시 함수
-async def get_naver_short_url(long_url):
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-        # 네이버 단축주소 생성 페이지 접속
-        await page.goto("https://me2.do/")
-        # 실제 네이버 단축 주소를 만드는 자동화 절차를 여기 구현해야 함
-        # (아래는 예시입니다. 실제 구현에 맞게 직접 작성)
-        # 예시: input에 URL 입력, 버튼 클릭, 결과 복사 등
-        # await page.fill("input[name='url']", long_url)
-        # await page.click("button[type='submit']")
-        # await page.wait_for_selector(".short-url")
-        # short_url = await page.input_value(".short-url")
-        # ------
-        short_url = "https://naver.me/xxxx"  # 예시, 실제 구현 필요
-        await browser.close()
-        return short_url
+# 언론사 매핑
+press_name_map = {
+    "chosun.com": "조선일보", "yna.co.kr": "연합뉴스", "hani.co.kr": "한겨레",
+    "joongang.co.kr": "중앙일보", "mbn.co.kr": "MBN", "kbs.co.kr": "KBS",
+    "sbs.co.kr": "SBS", "ytn.co.kr": "YTN", "donga.com": "동아일보",
+    "segye.com": "세계일보", "munhwa.com": "문화일보", "newsis.com": "뉴시스",
+    "naver.com": "네이버", "daum.net": "다음", "kukinews.com": "국민일보",
+    "kookbang.dema.mil.kr": "국방일보", "edaily.co.kr": "이데일리",
+    "news1.kr": "뉴스1", "mbnmoney.mbn.co.kr": "MBN", "news.kmib.co.kr": "국민일보",
+    "jtbc.co.kr": "JTBC"
+}
 
-def sync_get_naver_short_url(long_url):
-    # 동기 방식으로 Playwright 호출
-    return asyncio.run(get_naver_short_url(long_url))
+def extract_press_name(url):
+    try:
+        domain = urllib.parse.urlparse(url).netloc.replace("www.", "")
+        for key, name in press_name_map.items():
+            if domain == key or domain.endswith("." + key):
+                return domain, name
+        return domain, domain
+    except Exception:
+        return None, None
 
-# 네이버 뉴스 검색 API
-def search_news(query):
+def convert_to_mobile_link(url):
+    if "n.news.naver.com/article" in url:
+        return url.replace("n.news.naver.com/article", "n.news.naver.com/mnews/article")
+    return url
+
+def search_news(query, display=30):
     enc = urllib.parse.quote(query)
-    url = f"https://openapi.naver.com/v1/search/news.json?query={enc}&display=3&sort=date"
+    url = f"https://openapi.naver.com/v1/search/news.json?query={enc}&display={display}&sort=date"
     headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET}
     r = requests.get(url, headers=headers)
     if r.status_code == 200:
         return r.json().get("items", [])
     return []
 
-@app.route('/')
-def index():
-    return "Flask 뉴스검색+Playwright 단축주소 API 정상 실행 중!"
+def parse_pubdate(pubdate_str):
+    try:
+        dt = datetime(*eut.parsedate(pubdate_str)[:6], tzinfo=timezone(timedelta(hours=9)))
+        return dt
+    except:
+        return None
 
-@app.route('/news')
+# Playwright를 사용한 네이버 단축주소 자동화
+async def get_naver_short_url(long_url):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+        await page.goto("https://me2.do/")
+        await page.fill('input[type="text"]', long_url)
+        await page.click('button[type="submit"]')
+        await page.wait_for_selector('input[readonly]')
+        short_url = await page.input_value('input[readonly]')
+        await browser.close()
+        return short_url
+
+def sync_get_naver_short_url(long_url):
+    return asyncio.run(get_naver_short_url(long_url))
+
+# Flask 앱
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Flask + Playwright 네이버 뉴스검색 + 단축주소 API"
+
+@app.route("/news", methods=["GET"])
 def news():
     query = request.args.get("query", "군대")
-    items = search_news(query)
-    result = []
-    for item in items:
-        title = html.unescape(item["title"]).replace("<b>", "").replace("</b>", "")
-        url = item["link"]
-        # 단축주소 생성 (실제로는 Playwright 동작)
-        short_url = sync_get_naver_short_url(url)
-        result.append({
-            "title": title,
-            "url": url,
-            "short_url": short_url
+    search_mode = request.args.get("mode", "전체")  # 전체/동영상만/주요언론사만
+    now = datetime.now(timezone(timedelta(hours=9)))
+
+    # 기본 키워드 목록 (파라미터 없으면)
+    def_keywords = ["육군", "국방", "외교", "안보", "북한",
+                    "신병교육대", "훈련", "간부", "장교",
+                    "부사관", "병사", "용사", "군무원"]
+    keyword_list = request.args.get("keywords")
+    if keyword_list:
+        keyword_list = [k.strip() for k in keyword_list.split(",") if k.strip()]
+    else:
+        keyword_list = def_keywords
+
+    url_map = {}
+
+    for kw in keyword_list:
+        items = search_news(kw)
+        for a in items:
+            title = html.unescape(a["title"]).replace("<b>", "").replace("</b>", "")
+            desc = html.unescape(a.get("description", "")).replace("<b>", "").replace("</b>", "")
+            url = a["link"]
+            pub = parse_pubdate(a.get("pubDate", "")) or datetime.min.replace(tzinfo=timezone(timedelta(hours=9)))
+            domain, press = extract_press_name(a.get("originallink") or url)
+            # 4시간 이내 뉴스만
+            if not pub or (now - pub > timedelta(hours=4)):
+                continue
+            # 모드별 필터
+            if search_mode == "주요언론사만" and press not in press_name_map.values():
+                continue
+            if search_mode == "동영상만":
+                if press not in press_name_map.values():
+                    continue
+                video_keys = ["영상", "동영상", "영상보기", "보러가기", "뉴스영상", "영상뉴스", "클릭하세요", "바로보기"]
+                video_text = any(k in desc for k in video_keys) or any(k in title for k in video_keys)
+                video_url = any(p in url for p in ["/v/", "/video/", "vid="])
+                if not (video_text or video_url):
+                    continue
+            # 중복 URL 관리 및 키워드 매핑
+            if url not in url_map:
+                url_map[url] = {
+                    "title": title,
+                    "url": url,
+                    "press": press,
+                    "pubdate": pub,
+                    "matched": set([kw])
+                }
+            else:
+                url_map[url]["matched"].add(kw)
+
+    articles = []
+    for v in url_map.values():
+        v["matched"] = sorted(v["matched"])
+        # Playwright로 단축주소 생성 (오류시 원본 URL로 대체)
+        try:
+            v["short_url"] = sync_get_naver_short_url(v["url"])
+        except Exception as e:
+            v["short_url"] = v["url"]
+        articles.append(v)
+    # 최신순 정렬
+    sorted_list = sorted(articles, key=lambda x: x['pubdate'], reverse=True)
+
+    # 결과 출력
+    output = []
+    for art in sorted_list:
+        output.append({
+            "title": art['title'],
+            "press": art['press'],
+            "pubdate": art['pubdate'].strftime('%Y-%m-%d %H:%M'),
+            "matched": art['matched'],
+            "url": convert_to_mobile_link(art['url']),
+            "short_url": art.get("short_url", "")
         })
-    return jsonify(result)
+    return jsonify(output)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000)
