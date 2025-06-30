@@ -89,9 +89,31 @@ async def get_news_html(query, video_only, date=None):
     dt = date or datetime.now().strftime("%Y.%m.%d")
     smode = "2" if video_only else "0"
     url = f"https://m.search.naver.com/search.naver?ssc=tab.m_news.all&query={query}&sm=mtb_opt&sort=1&photo={smode}&field=0&pd=0&ds={dt}&de={dt}&docid=&related=0&mynews=0&office_type=0&office_section_code=0&news_office_checked=&nso=so%3Add%2Cp%3Aall"
+
+    # 실제 브라우저와 유사한 다양한 HTTP 헤더 추가
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36", # 최신 데스크톱 User-Agent
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+    }
     async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(url, headers={"User-Agent":"Mozilla/5.0"})
-        return r.text
+        try:
+            r = await client.get(url, headers=headers)
+            r.raise_for_status() # HTTP 4xx/5xx 에러 발생 시 예외 발생
+            return r.text
+        except httpx.HTTPStatusError as e:
+            print(f"HTTP 오류 발생 (get_news_html): {e.response.status_code} - {e.response.text}")
+            return ""
+        except httpx.RequestError as e:
+            print(f"요청 오류 발생 (get_news_html): {e}")
+            return ""
 
 from playwright.async_api import async_playwright
 
@@ -148,7 +170,7 @@ async def naver_me_shorten(orig_url):
             return orig_url, "naver.me 주소 못찾음"
     except Exception as e:
         # 오류 발생 시 디버깅을 위해 더 상세한 정보 로깅
-        print(f"Playwright 오류 발생: {e}, URL: {orig_url}")
+        print(f"Playwright 오류 발생 (naver_me_shorten): {e}, URL: {orig_url}")
         return orig_url, f"Playwright 오류: {str(e)}"
 
 @app.get("/", response_class=None)
