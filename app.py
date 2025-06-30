@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import httpx
 from datetime import datetime, timedelta
 from typing import List, Dict
+import random # 랜덤 딜레이를 위한 import
 
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key="news!search!secret")
@@ -60,7 +61,7 @@ def parse_newslist(html:str, keywords:List[str], search_mode:str, video_only:boo
         if not kwcnt: continue
         results.append(dict(
             title=title, url=url, press=press_name,
-            pubdate=pub_kst.strftime('%Y-%m-%d %H:%M'), 
+            pubdate=pub_kst.strftime('%Y-%m-%d %H:%M'),
             keywords=sorted(kwcnt.items(), key=lambda x:(-x[1], x[0])),
             kw_count=sum(kwcnt.values())
         ))
@@ -98,23 +99,56 @@ async def naver_me_shorten(orig_url):
     if not orig_url.startswith("https://n.news.naver.com/"): return orig_url, "n.news.naver.com 아님"
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page(viewport={"width":400, "height":800}, user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)")
+            # 봇 감지 회피를 위한 브라우저 인자 추가
+            browser = await p.chromium.launch(
+                headless=True, # 배포 시 headless 유지, 테스트 시 False로 변경 가능
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--disable-gpu'
+                ]
+            )
+            # 최신 모바일 User-Agent 사용
+            latest_user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+            page = await browser.new_page(
+                viewport={"width":400, "height":800},
+                user_agent=latest_user_agent
+            )
+
             await page.goto(orig_url, timeout=8000)
-            await page.wait_for_selector("span.u_hc, span:has-text('SNS 보내기')", timeout=7000)
-            btn = await page.query_selector("span.u_hc, span:has-text('SNS 보내기')")
+            await asyncio.sleep(random.uniform(1.5, 3.5)) # 페이지 로드 후 1.5~3.5초 랜덤 대기
+
+            # 'SNS 보내기' 버튼을 찾거나, '공유' 아이콘이 포함된 span을 찾습니다.
+            # 네이버 웹 페이지 구조가 변경될 경우 이 선택자를 수정해야 할 수 있습니다.
+            share_button_selector = "span.u_hc, span:has-text('SNS 보내기'), #m-toolbar-navernews-share-btn"
+            await page.wait_for_selector(share_button_selector, timeout=7000)
+            await asyncio.sleep(random.uniform(0.7, 1.8)) # 선택자 대기 후 0.7~1.8초 랜덤 대기
+
+            btn = await page.query_selector(share_button_selector)
             if not btn:
                 await browser.close()
                 return orig_url, "공유 버튼 selector 못찾음"
+
             await btn.click()
-            await page.wait_for_selector("#spiButton a, .spi_sns_list .link_sns", timeout=6000)
-            link_elem = await page.query_selector("#spiButton a, .spi_sns_list .link_sns")
+            await asyncio.sleep(random.uniform(1.0, 2.5)) # 버튼 클릭 후 1~2.5초 랜덤 대기
+
+            # 단축 URL이 포함된 요소 찾기
+            link_elem_selector = "#spiButton a, .spi_sns_list .link_sns"
+            await page.wait_for_selector(link_elem_selector, timeout=6000)
+            await asyncio.sleep(random.uniform(0.5, 1.0)) # 단축 URL 요소 대기 후 0.5~1초 랜덤 대기
+
+            link_elem = await page.query_selector(link_elem_selector)
             link = await link_elem.get_attribute("data-url") if link_elem else None
             await browser.close()
             if link and link.startswith("https://naver.me/"):
                 return link, ""
             return orig_url, "naver.me 주소 못찾음"
     except Exception as e:
+        # 오류 발생 시 디버깅을 위해 더 상세한 정보 로깅
+        print(f"Playwright 오류 발생: {e}, URL: {orig_url}")
         return orig_url, f"Playwright 오류: {str(e)}"
 
 @app.get("/", response_class=None)
@@ -144,7 +178,8 @@ async def render_news(request, keywords="", checked_two_keywords="", search_mode
     newslist = parse_newslist(html, kwlist, search_mode, video_only=="on")
     # 2개 이상 키워드만
     checked_two = checked_two_keywords=="on"
-    filtered = [a for a in newslist if len([cnt for k,cnt in a['keywords'] if c>0])>=2] if checked_two else newslist
+    # 필터링 로직 수정: `c`가 정의되지 않은 오류 수정 및 필터링 조건 명확화
+    filtered = [a for a in newslist if len([kw_cnt for kw, kw_cnt in a['keywords'] if kw_cnt > 0]) >= 2] if checked_two else newslist
     msg = f"총 {len(filtered)}건의 뉴스가 검색되었습니다."
     return templates.TemplateResponse("news_search.html", {
         "request": request,
@@ -173,7 +208,8 @@ async def shorten_urls(
     html = await get_news_html(query, video_only=="on")
     newslist = parse_newslist(html, kwlist, search_mode, video_only=="on")
     checked_two = checked_two_keywords=="on"
-    filtered = [a for a in newslist if len([cnt for k,cnt in a['keywords'] if c>0])>=2] if checked_two else newslist
+    # 필터링 로직 수정: `c`가 정의되지 않은 오류 수정 및 필터링 조건 명확화
+    filtered = [a for a in newslist if len([kw_cnt for kw, kw_cnt in a['keywords'] if kw_cnt > 0]) >= 2] if checked_two else newslist
     idx_set = set(map(int, selected_urls)) if isinstance(selected_urls, list) else set()
     selected = [filtered[i] for i in idx_set if 0<=i<len(filtered)]
     shortened_lines = []
@@ -198,3 +234,4 @@ async def shorten_urls(
         "shortened": "\n\n".join(shortened_lines),
         "shorten_fail": shorten_fail,
     })
+
