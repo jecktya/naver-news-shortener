@@ -1,18 +1,20 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>📰 네이버 뉴스검색기 + 단축주소</title>
     <style>
-        body { font-family: 'Malgun Gothic', sans-serif; background:#fcfcfc; margin:40px; }
-        input[type=text], textarea, select { font-size:1.1em; padding:6px; border:1px solid #ccc; border-radius:5px; }
-        .btn { font-size:1em; padding:6px 12px; border-radius:5px; border:none; background:#4287f5; color:#fff; cursor:pointer; margin:5px; }
-        .btn:hover { opacity:0.9; }
-        table { width:100%; border-collapse:collapse; margin-top:20px; }
+        body { font-family:'Malgun Gothic',sans-serif; background:#f9f9f9; margin:40px; }
+        form { margin-bottom:20px; }
+        label, select, input[type=text], button { font-size:1em; }
+        select, input[type=text] { padding:6px; border:1px solid #ccc; border-radius:4px; }
+        button { padding:6px 12px; margin-left:8px; background:#4287f5; color:#fff; border:none; border-radius:4px; cursor:pointer; }
+        button:hover { opacity:0.9; }
+        table { width:100%; border-collapse:collapse; margin-top:10px; }
         th, td { border:1px solid #ddd; padding:8px; text-align:left; }
         th { background:#f2f2f2; }
-        .small { font-size:0.9em; color:#555; }
+        textarea { width:100%; height:120px; font-size:1em; padding:8px; border:1px solid #ccc; border-radius:4px; }
+        hr { margin:24px 0; border:none; border-top:1px solid #eee; }
     </style>
 </head>
 <body>
@@ -20,72 +22,48 @@
     <form method="post" action="/">
         <label>🗂️ 검색 유형:</label>
         <select name="search_mode">
-            <option value="all" {% raw %}{% if search_mode == "all" %}selected{% endif %}{% endraw %}>전체</option>
-            <option value="major" {% raw %}{% if search_mode == "major" %}selected{% endif %}{% endraw %}>주요언론사만</option>
+            <option value="all" {% if search_mode == 'all' %}selected{% endif %}>전체</option>
+            <option value="major" {% if search_mode == 'major' %}selected{% endif %}>주요언론사만</option>
         </select>
-        <label style="margin-left:20px;"><input type="checkbox" name="video_only" value="on" {% raw %}{% if video_only %}checked{% endif %}{% endraw %}> 동영상만</label>
+        <label style="margin-left:20px;"><input type="checkbox" name="video_only" value="on" {% if video_only %}checked{% endif %}> 동영상만</label>
         <br><br>
         <label>🔍 키워드 (쉼표로 구분):</label><br>
-        <input type="text" name="keywords" style="width:400px;" value="{% raw %}{{ keyword_input or '' }}{% endraw %}" placeholder="{% raw %}{{ default_keywords }}{% endraw %}" />
-        <button type="submit" class="btn">🔍 검색</button>
+        <input type="text" name="keywords" style="width:400px;" value="{{ keyword_input or '' }}" placeholder="{{ default_keywords }}">
+        <button type="submit">🔍 검색</button>
     </form>
-</body>
-</html>
 
-
-
-<!-- templates/news_search.html -->
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <title>검색 결과 - 뉴스검색기</title>
-    <style> /* 테이블 스타일은 index.html과 동일 */ </style>
-</head>
-<body>
-    <h1>검색 결과</h1>
-    <a href="/">🔍 다시 검색</a>
-    <table>
-        <tr>
-            <th>선택</th>
-            <th>제목</th>
-            <th>언론사</th>
-            <th>시간</th>
-            <th>원본 URL</th>
-        </tr>
-        {% raw %}{% for idx, art in enumerate(final_results) %}{% endraw %}
-        <tr>
-            <td><input type="checkbox" name="selected_urls" value="{% raw %}{{ idx }}{% endraw %}" checked></td>
-            <td>{% raw %}{{ art.title }}{% endraw %}</td>
-            <td>{% raw %}{{ art.press }}{% endraw %}</td>
-            <td>{% raw %}{{ art.pubdate }}{% endraw %}</td>
-            <td><a href="{% raw %}{{ art.url }}{% endraw %}" target="_blank">원본</a></td>
-        </tr>
-        {% raw %}{% endfor %}{% endraw %}
-    </table>
+    {% if final_results %}
+    <hr>
+    <h2>🔎 검색 결과</h2>
     <form method="post" action="/shorten">
-        {% raw %}{% for idx, art in enumerate(final_results) %}{% endraw %}
-            <input type="hidden" name="selected_urls" value="{% raw %}{{ idx }}{% endraw %}">
-        {% raw %}{% endfor %}{% endraw %}
-        <button type="submit" class="btn">🔗 단축 주소 생성</button>
+        <table>
+            <tr>
+                <th>선택</th>
+                <th>제목</th>
+                <th>언론사</th>
+                <th>시간</th>
+                <th>원본 URL</th>
+            </tr>
+            {% for idx, art in enumerate(final_results) %}
+            <tr>
+                <td><input type="checkbox" name="selected_urls" value="{{ idx }}" checked></td>
+                <td>{{ art.title }}</td>
+                <td>{{ art.press }}</td>
+                <td>{{ art.pubdate }}</td>
+                <td><a href="{{ art.url }}" target="_blank">원본</a></td>
+            </tr>
+            {% endfor %}
+        </table>
+        <button type="submit">🔗 단축 주소 생성</button>
     </form>
-</body>
-</html>
+    {% endif %}
 
+    {% if shortened %}
+    <hr>
+    <h2>🔗 단축 주소 결과</h2>
+    <textarea readonly>{{ shortened }}</textarea>
+    {% endif %}
 
-
-<!-- templates/short_result.html -->
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <title>단축 주소 결과</title>
-</head>
-<body>
-    <h1>🔗 단축 주소 결과</h1>
-    <textarea rows="10" style="width:100%;" readonly>
-{% raw %}{{ shortened }}{% endraw %}
-    </textarea>
-    <br><a href="/">🏠 홈으로 돌아가기</a>
+    <p style="margin-top:30px;"><a href="/">🏠 홈으로 돌아가기</a></p>
 </body>
 </html>
