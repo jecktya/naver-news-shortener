@@ -54,6 +54,10 @@
             </tr>
             {% endfor %}
         </table>
+        <input type="hidden" name="final_results_json" value='{{ final_results|tojson|safe }}'>
+        <input type="hidden" name="keyword_input" value="{{ keyword_input }}">
+        <input type="hidden" name="search_mode" value="{{ search_mode }}">
+        <input type="hidden" name="video_only" value="{{ video_only }}">
         <button type="submit">🔗 단축 주소 생성</button>
     </form>
     {% endif %}
