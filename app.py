@@ -1,12 +1,14 @@
 # app.py
 # -*- coding: utf-8 -*-
 
+import os
 import re
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from typing import List, Dict
 from fastapi import FastAPI, HTTPException, Query
+import uvicorn
 
 # —————————————————————————————————————————————————————————————————————————————
 # 설정: 기본 키워드와 주요 언론사 목록
@@ -30,12 +32,14 @@ def parse_time(timestr: str) -> datetime:
         try:
             m = int(timestr.split('분')[0])
             return now - timedelta(minutes=m)
-        except: pass
+        except:
+            return None
     if '시간 전' in timestr:
         try:
             h = int(timestr.split('시간')[0])
             return now - timedelta(hours=h)
-        except: pass
+        except:
+            return None
     m = re.match(r'(\d{4})\.(\d{2})\.(\d{2})\.', timestr)
     if m:
         y, mm, d = map(int, m.groups())
@@ -58,7 +62,8 @@ def parse_newslist(
 
     for li in items:
         a = li.select_one('a.news_tit')
-        if not a: continue
+        if not a:
+            continue
         title = a['title'].strip()
         url   = a['href'].strip()
 
@@ -85,8 +90,9 @@ def parse_newslist(
         desc = desc_elem.get_text(' ', strip=True) if desc_elem else ''
 
         hay = (title + ' ' + desc).lower()
+        kw_source = keywords or DEFAULT_KEYWORDS
         kwcnt = {kw: hay.count(kw.lower())
-                 for kw in (keywords or DEFAULT_KEYWORDS)
+                 for kw in kw_source
                  if hay.count(kw.lower())}
         if not kwcnt:
             continue
@@ -138,7 +144,6 @@ async def analyze(
 
     # 2) 키워드 리스트 처리
     user_keywords = [k.strip() for k in kws.split(',') if k.strip()]
-    # 빈 문자열이면 None → parse 함수 내부에서 DEFAULT 사용
     keywords = user_keywords if user_keywords else None
 
     # 3) 뉴스 파싱
@@ -150,10 +155,17 @@ async def analyze(
     )
 
     return {
-        "query_url": url,
-        "mode":      mode,
-        "video_only": video,
+        "query_url":    url,
+        "mode":         mode,
+        "video_only":   video,
         "keyword_list": keywords or DEFAULT_KEYWORDS,
-        "count":     len(articles),
-        "articles":  articles
+        "count":        len(articles),
+        "articles":     articles
     }
+
+# —————————————————————————————————————————————————————————————————————————————
+# uvicorn 직접 실행 (Railway 등에서 환경변수 PORT 사용)
+# —————————————————————————————————————————————————————————————————————————————
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
