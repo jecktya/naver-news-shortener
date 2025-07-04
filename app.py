@@ -1,6 +1,3 @@
-# app.py
-# -*- coding: utf-8 -*-
-
 import os
 import re
 import requests
@@ -10,7 +7,7 @@ from typing import List, Dict
 from fastapi import FastAPI, HTTPException, Query
 import uvicorn
 
-# 기본 키워드와 주요 언론사 목록
+# 기본 키워드 및 주요 언론사 목록
 DEFAULT_KEYWORDS = [
     '육군', '국방', '외교', '안보', '북한',
     '신병', '교육대', '훈련', '간부',
@@ -18,12 +15,12 @@ DEFAULT_KEYWORDS = [
 ]
 PRESS_MAJOR = {
     '연합뉴스', '조선일보', '한겨레', '중앙일보',
-    'MBN', 'KBS', 'SBS', 'YTN',
-    '동아일보', '세계일보', '문화일보', '뉴시스',
-    '국민일보', '국방일보', '이데일리',
-    '뉴스1', 'JTBC'
+    'MBN', 'KBS', 'SBS', 'YTN', '동아일보',
+    '세계일보', '문화일보', '뉴시스', '국민일보',
+    '국방일보', '이데일리', '뉴스1', 'JTBC'
 }
 
+# 시간 파싱 함수
 def parse_time(timestr: str) -> datetime:
     now = datetime.now()
     if '분 전' in timestr:
@@ -38,29 +35,31 @@ def parse_time(timestr: str) -> datetime:
             return now - timedelta(hours=h)
         except:
             return None
-    m = re.match(r'(\d{4})\.(\d{2})\.(\d{2})\.', timestr)
+    m = re.match(r"(\d{4})\.(\d{2})\.(\d{2})\.", timestr)
     if m:
         y, mm, d = map(int, m.groups())
         return datetime(y, mm, d)
     return None
 
+# HTML 파싱: 모바일 뉴스 목록
 def parse_newslist(
     html: str,
-    keywords: List[str],
-    search_mode: str,
-    video_only: bool
+    keywords: List[str] = None,
+    search_mode: str = 'all',
+    video_only: bool = False
 ) -> List[Dict]:
     soup = BeautifulSoup(html, 'html.parser')
     items = soup.select('ul.list_news > li')
     now = datetime.now()
     results: List[Dict] = []
 
+    kw_source = keywords if keywords else DEFAULT_KEYWORDS
     for li in items:
         a = li.select_one('a.news_tit')
         if not a:
             continue
         title = a.get('title', '').strip()
-        url   = a.get('href', '').strip()
+        url = a.get('href', '').strip()
 
         press_elem = li.select_one('a.info.press')
         press = press_elem.get_text(strip=True).replace('언론사 선정','') if press_elem else ''
@@ -74,51 +73,49 @@ def parse_newslist(
         if search_mode == 'major' and press and press not in PRESS_MAJOR:
             continue
 
-        if video_only:
-            if not li.select_one("a.news_tit[href*='tv.naver.com'], span.video"):
-                continue
+        if video_only and not li.select_one("a.news_tit[href*='tv.naver.com'], span.video"):
+            continue
 
         desc_elem = li.select_one('div.news_dsc, div.api_txt_lines.dsc')
         desc = desc_elem.get_text(' ', strip=True) if desc_elem else ''
 
         hay = (title + ' ' + desc).lower()
-        kw_source = keywords if keywords is not None else DEFAULT_KEYWORDS
-        kwcnt = {kw: hay.count(kw.lower()) for kw in kw_source if hay.count(kw.lower())}
+        kwcnt = {kw: hay.count(kw.lower()) for kw in kw_source if hay.lower().count(kw.lower())}
         if not kwcnt:
             continue
 
         results.append({
-            'title':    title,
-            'url':      url,
-            'press':    press,
-            'pubdate':  pubtime.strftime('%Y-%m-%d %H:%M'),
+            'title': title,
+            'url': url,
+            'press': press,
+            'pubdate': pubtime.strftime('%Y-%m-%d %H:%M'),
             'keywords': sorted(kwcnt.items(), key=lambda x: (-x[1], x[0])),
             'kw_count': sum(kwcnt.values())
         })
 
-    results.sort(key=lambda x: (-x['kw_count'], x['pubdate']), reverse=False)
+    results.sort(key=lambda x: (-x['kw_count'], x['pubdate']))
     return results
 
+# HTML 요청 함수
 def fetch_html(url: str) -> str:
     headers = {'User-Agent': 'Mozilla/5.0'}
     resp = requests.get(url, headers=headers, timeout=10)
     resp.raise_for_status()
     return resp.text
 
+# FastAPI 애플리케이션
 app = FastAPI(title="Naver Mobile News Analyzer")
 
-# 헬스체크
 @app.get("/", include_in_schema=False)
 async def health_check():
     return {"status": "ok"}
 
-# 분석 엔드포인트
 @app.get("/analyze")
 async def analyze(
     url: str = Query(..., description="모바일 뉴스 검색 URL"),
     mode: str = Query("all", regex="^(all|major)$", description="all 또는 major"),
     video: bool = Query(False, description="동영상 뉴스만 필터링"),
-    kws: str = Query("", description="콤마로 구분된 키워드(strings)")
+    kws: str = Query("", description="콤마로 구분된 키워드")
 ):
     try:
         html = fetch_html(url)
@@ -136,14 +133,14 @@ async def analyze(
     )
 
     return {
-        "query_url":    url,
-        "mode":         mode,
-        "video_only":   video,
+        "query_url": url,
+        "mode": mode,
+        "video_only": video,
         "keyword_list": keywords or DEFAULT_KEYWORDS,
-        "count":        len(articles),
-        "articles":     articles
+        "count": len(articles),
+        "articles": articles
     }
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port)
+    uvicorn.run("news_analyzer:app", host="0.0.0.0", port=port)
