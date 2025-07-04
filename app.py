@@ -171,4 +171,11 @@ async def post_shorten(
         'shortened': '\n'.join(shortened_list),
         'keyword_input': keyword_input,
         'default_keywords': ', '.join(DEFAULT_KEYWORDS),
-        'search_mode': search_mo
+        'search_mode': search_mode,
+        'video_only': bool(video_only)
+    })
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get('PORT', 8080))
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
