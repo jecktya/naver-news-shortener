@@ -9,3 +9,4 @@ playwright
 python-multipart
 httpx
 itsdangerous
+uvicorn[standard]
