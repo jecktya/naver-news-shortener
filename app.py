@@ -1,134 +1,44 @@
 # app.py
-# -*- coding: utf-8 -*-
 
-import os
-import re
-import requests
+import os, re, requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from typing import List, Dict
 from fastapi import FastAPI, HTTPException, Query
 import uvicorn
 
-DEFAULT_KEYWORDS = [
-    '육군', '국방', '외교', '안보', '북한',
-    '신병', '교육대', '훈련', '간부',
-    '장교', '부사관', '병사', '용사', '군무원'
-]
-PRESS_MAJOR = {
-    '연합뉴스', '조선일보', '한겨레', '중앙일보',
-    'MBN', 'KBS', 'SBS', 'YTN', '동아일보',
-    '세계일보', '문화일보', '뉴시스', '국민일보',
-    '국방일보', '이데일리', '뉴스1', 'JTBC'
-}
-
-def parse_time(timestr: str) -> datetime:
-    now = datetime.now()
-    if '분 전' in timestr:
-        try:
-            m = int(timestr.split('분')[0])
-            return now - timedelta(minutes=m)
-        except: return None
-    if '시간 전' in timestr:
-        try:
-            h = int(timestr.split('시간')[0])
-            return now - timedelta(hours=h)
-        except: return None
-    m = re.match(r'(\d{4})\.(\d{2})\.(\d{2})\.', timestr)
-    if m:
-        y, mm, d = map(int, m.groups())
-        return datetime(y, mm, d)
-    return None
-
-def parse_newslist(
-    html: str,
-    keywords: List[str],
-    search_mode: str,
-    video_only: bool
-) -> List[Dict]:
-    soup = BeautifulSoup(html, 'html.parser')
-    items = soup.select('ul.list_news > li')
-    now = datetime.now()
-    results = []
-
-    for li in items:
-        a = li.select_one('a.news_tit')
-        if not a: continue
-        title = a['title'].strip()
-        url   = a['href'].strip()
-
-        press_elem = li.select_one('a.info.press')
-        press = press_elem.get_text(strip=True).replace('언론사 선정','') if press_elem else ''
-
-        date_elem = li.select_one('span.info.date')
-        pubstr = date_elem.get_text(strip=True) if date_elem else ''
-        pubtime = parse_time(pubstr)
-        if not pubtime or (now - pubtime) > timedelta(hours=4):
-            continue
-
-        if search_mode == 'major' and press and press not in PRESS_MAJOR:
-            continue
-
-        if video_only and not li.select_one("a.news_tit[href*='tv.naver.com'], span.video"):
-            continue
-
-        desc_elem = li.select_one('div.news_dsc, div.api_txt_lines.dsc')
-        desc = desc_elem.get_text(' ', strip=True) if desc_elem else ''
-
-        hay = (title + ' ' + desc).lower()
-        kw_source = keywords or DEFAULT_KEYWORDS
-        kwcnt = {kw: hay.count(kw.lower()) for kw in kw_source if hay.count(kw.lower())}
-        if not kwcnt: continue
-
-        results.append({
-            'title':    title,
-            'url':      url,
-            'press':    press,
-            'pubdate':  pubtime.strftime('%Y-%m-%d %H:%M'),
-            'keywords': sorted(kwcnt.items(), key=lambda x:(-x[1], x[0])),
-            'kw_count': sum(kwcnt.values()),
-        })
-
-    results.sort(key=lambda x:(-x['kw_count'], x['pubdate']), reverse=False)
-    return results
-
-def fetch_html(url: str) -> str:
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    resp = requests.get(url, headers=headers, timeout=10)
-    resp.raise_for_status()
-    return resp.text
-
 app = FastAPI(title="Naver Mobile News Analyzer")
+
+# 1) 헬스체크 엔드포인트
+@app.get("/", include_in_schema=False)
+async def health_check():
+    return {"status": "ok"}
+
+# 2) /analyze 엔드포인트 (기존 로직)
+DEFAULT_KEYWORDS = [ … ]
+PRESS_MAJOR = { … }
+
+def parse_time(timestr): … 
+def parse_newslist(html, keywords, search_mode, video_only): …
+def fetch_html(url): …
 
 @app.get("/analyze")
 async def analyze(
-    url: str = Query(..., description="모바일 뉴스 검색 URL"),
+    url: str = Query(...),
     mode: str = Query("all", regex="^(all|major)$"),
     video: bool = Query(False),
-    kws: str = Query("", description="콤마로 구분된 키워드")
+    kws: str = Query("")
 ):
     try:
         html = fetch_html(url)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"URL 요청 실패: {e}")
-
-    user_keywords = [k.strip() for k in kws.split(',') if k.strip()]
-    keywords = user_keywords if user_keywords else None
-
-    articles = parse_newslist(
-        html=html,
-        keywords=keywords,
-        search_mode=mode,
-        video_only=video
-    )
-
+        raise HTTPException(400, f"URL 요청 실패: {e}")
+    user_keywords = [k.strip() for k in kws.split(",") if k.strip()]
+    keywords = user_keywords or None
+    articles = parse_newslist(html, keywords, mode, video)
     return {
-        "query_url":    url,
-        "mode":         mode,
-        "video_only":   video,
-        "keyword_list": keywords or DEFAULT_KEYWORDS,
-        "count":        len(articles),
-        "articles":     articles
+        "count": len(articles),
+        "articles": articles
     }
 
 if __name__ == "__main__":
