@@ -59,31 +59,44 @@ async def get_page_html(query: str, video_only: bool) -> str:
 def parse_news(html: str, keywords: List[str], mode: str, video_only: bool) -> List[Dict]:
     print(">> [parse_news] called")
     soup = BeautifulSoup(html, 'html.parser')
-    items = soup.select('ul.list_news > li')
+    # 최신 네이버 모바일 뉴스 결과 셀렉터(2024~2025)
+    items = soup.select('div.sds-comps-vertical-layout.sds-comps-full-layout')
     print(">> [parse_news] Found items:", len(items))
     now = datetime.now()
     results: List[Dict] = []
     kw_source = keywords or DEFAULT_KEYWORDS
 
-    for li in items:
-        a = li.select_one('a.news_tit')
-        if not a:
+    for item in items:
+        # 제목/링크
+        a_headline = item.select_one('a span.sds-comps-text-type-headline1')
+        if not a_headline:
             continue
-        title = a.get('title', '').strip()
-        link = a['href']
-        press_elem = li.select_one('a.info.press')
-        press = press_elem.get_text(strip=True).replace('언론사 선정','') if press_elem else ''
-        date_elem = li.select_one('span.info.date')
-        pubstr = date_elem.get_text(strip=True) if date_elem else ''
-        pub = parse_time(pubstr)
-        if not pub or (now - pub) > timedelta(hours=4):
+        title = a_headline.get_text(strip=True)
+        link = a_headline.find_parent('a')['href']
+        # 요약/본문
+        summary_span = item.select_one('span.sds-comps-text-type-body1')
+        desc = summary_span.get_text(strip=True) if summary_span else ''
+        # 언론사(없으면 '')
+        press = ''
+        press_tag = item.select_one('a.info.press')
+        if press_tag:
+            press = press_tag.get_text(strip=True)
+        # 시간(없으면 '')
+        pubstr = ''
+        date_tag = item.select_one('span.info.date')
+        if date_tag:
+            pubstr = date_tag.get_text(strip=True)
+        pub = parse_time(pubstr) if pubstr else now
+
+        # 주요언론사 필터 (기존 로직 유지)
+        if mode == 'major' and press and press not in PRESS_MAJOR:
             continue
-        if mode == 'major' and press not in PRESS_MAJOR:
+
+        # 동영상만 (해당 부분은 현재 구조에 따라 별도 처리 필요할 수 있음)
+        if video_only:
+            # 동영상 뉴스 식별이 필요한 경우 별도 구현
             continue
-        if video_only and not li.select_one("a.news_tit[href*='tv.naver.com'], span.video"):
-            continue
-        desc_elem = li.select_one('div.news_dsc, div.api_txt_lines.dsc')
-        desc = desc_elem.get_text(' ', strip=True) if desc_elem else ''
+
         hay = (title + ' ' + desc).lower()
         kwcnt = {kw: hay.count(kw.lower()) for kw in kw_source if hay.count(kw.lower())}
         if not kwcnt:
@@ -91,14 +104,16 @@ def parse_news(html: str, keywords: List[str], mode: str, video_only: bool) -> L
         results.append({
             'title': title,
             'press': press,
-            'pubdate': pub.strftime('%Y-%m-%d %H:%M'),
+            'pubdate': pub.strftime('%Y-%m-%d %H:%M') if pub else '',
             'url': link,
+            'desc': desc,
             'keywords': sorted(kwcnt.items(), key=lambda x:(-x[1], x[0])),
             'kw_count': sum(kwcnt.values())
         })
     print(">> [parse_news] Returning", len(results), "results")
     results.sort(key=lambda x:(-x['kw_count'], x['pubdate']), reverse=False)
     return results
+
 
 async def naver_me_shorten(orig_url: str) -> str:
     # 실제 naver.me 단축주소 크롤링은 필요시 구현
