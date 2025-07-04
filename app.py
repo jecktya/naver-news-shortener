@@ -110,15 +110,18 @@ async def naver_me_shorten(orig_url: str) -> str:
 @app.get("/", include_in_schema=False)
 async def get_index(request: Request):
     print(">> [GET /] index")
-    return templates.TemplateResponse("index.html", {
-        'request': request,
-        'default_keywords': ', '.join(DEFAULT_KEYWORDS),
-        'search_mode': 'all',
-        'video_only': False,
-        'keyword_input': '',
-        'final_results': None,
-        'shortened': None
-    })
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            'request': request,
+            'default_keywords': ', '.join(DEFAULT_KEYWORDS),
+            'search_mode': 'all',
+            'video_only': False,
+            'keyword_input': '',
+            'final_results': None,
+            'shortened': None
+        }
+    )
 
 @app.post("/", include_in_schema=False)
 async def post_search(
@@ -134,15 +137,18 @@ async def post_search(
     print(">> [POST /] HTML fetched")
     final_results = parse_news(html, kw_list, search_mode, bool(video_only))
     print(">> [POST /] parse_news results:", len(final_results))
-    return templates.TemplateResponse("index.html", {
-        'request': request,
-        'final_results': final_results,
-        'keyword_input': keywords,
-        'default_keywords': ', '.join(DEFAULT_KEYWORDS),
-        'search_mode': search_mode,
-        'video_only': bool(video_only),
-        'shortened': None
-    })
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            'request': request,
+            'final_results': final_results,
+            'keyword_input': keywords,
+            'default_keywords': ', '.join(DEFAULT_KEYWORDS),
+            'search_mode': search_mode,
+            'video_only': bool(video_only),
+            'shortened': None
+        }
+    )
 
 @app.post("/shorten", include_in_schema=False)
 async def post_shorten(
@@ -165,15 +171,18 @@ async def post_shorten(
         except Exception as e:
             print("!! [POST /shorten] Error:", e)
     print(">> [POST /shorten] shortened_list:", shortened_list)
-    return templates.TemplateResponse("index.html", {
-        'request': request,
-        'final_results': final_results,
-        'shortened': '\n'.join(shortened_list),
-        'keyword_input': keyword_input,
-        'default_keywords': ', '.join(DEFAULT_KEYWORDS),
-        'search_mode': search_mode,
-        'video_only': bool(video_only)
-    })
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            'request': request,
+            'final_results': final_results,
+            'shortened': '\n'.join(shortened_list),
+            'keyword_input': keyword_input,
+            'default_keywords': ', '.join(DEFAULT_KEYWORDS),
+            'search_mode': search_mode,
+            'video_only': bool(video_only)
+        }
+    )
 
 if __name__ == "__main__":
     import uvicorn
