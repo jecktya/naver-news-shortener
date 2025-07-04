@@ -59,7 +59,7 @@ async def get_page_html(query: str, video_only: bool) -> str:
 def parse_news(html: str, keywords: List[str], mode: str, video_only: bool) -> List[Dict]:
     print(">> [parse_news] called")
     soup = BeautifulSoup(html, 'html.parser')
-    # 최신 네이버 모바일 뉴스 결과 셀렉터(2024~2025)
+    # 네이버 뉴스 블록 셀렉터 (앞부분 class 두 개만 사용)
     items = soup.select('div.sds-comps-vertical-layout.sds-comps-full-layout')
     print(">> [parse_news] Found items:", len(items))
     now = datetime.now()
@@ -73,28 +73,21 @@ def parse_news(html: str, keywords: List[str], mode: str, video_only: bool) -> L
             continue
         title = a_headline.get_text(strip=True)
         link = a_headline.find_parent('a')['href']
+
         # 요약/본문
         summary_span = item.select_one('span.sds-comps-text-type-body1')
         desc = summary_span.get_text(strip=True) if summary_span else ''
-        # 언론사(없으면 '')
+
+        # 언론사, 시간 정보는 네이버 뉴스 구조상 표기 안 될 수 있음
         press = ''
-        press_tag = item.select_one('a.info.press')
-        if press_tag:
-            press = press_tag.get_text(strip=True)
-        # 시간(없으면 '')
-        pubstr = ''
-        date_tag = item.select_one('span.info.date')
-        if date_tag:
-            pubstr = date_tag.get_text(strip=True)
-        pub = parse_time(pubstr) if pubstr else now
+        pub = now
 
         # 주요언론사 필터 (기존 로직 유지)
         if mode == 'major' and press and press not in PRESS_MAJOR:
             continue
 
-        # 동영상만 (해당 부분은 현재 구조에 따라 별도 처리 필요할 수 있음)
+        # 동영상만 (해당 부분은 별도 구현 필요시)
         if video_only:
-            # 동영상 뉴스 식별이 필요한 경우 별도 구현
             continue
 
         hay = (title + ' ' + desc).lower()
@@ -113,6 +106,7 @@ def parse_news(html: str, keywords: List[str], mode: str, video_only: bool) -> L
     print(">> [parse_news] Returning", len(results), "results")
     results.sort(key=lambda x:(-x['kw_count'], x['pubdate']), reverse=False)
     return results
+
 
 
 async def naver_me_shorten(orig_url: str) -> str:
