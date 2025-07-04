@@ -1,4 +1,4 @@
-# news_analyzer.py
+# app.py
 # -*- coding: utf-8 -*-
 
 import re
@@ -6,6 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from typing import List, Dict
+from fastapi import FastAPI, HTTPException, Query
 
 # —————————————————————————————————————————————————————————————————————————————
 # 설정: 기본 키워드와 주요 언론사 목록
@@ -14,7 +15,6 @@ DEFAULT_KEYWORDS = [
     '육군', '국방', '외교', '안보', '북한', '신병', '교육대',
     '훈련', '간부', '장교', '부사관', '병사', '용사', '군무원'
 ]
-
 PRESS_MAJOR = {
     '연합뉴스', '조선일보', '한겨레', '중앙일보', 'MBN', 'KBS', 'SBS', 'YTN',
     '동아일보', '세계일보', '문화일보', '뉴시스', '국민일보', '국방일보',
@@ -30,15 +30,12 @@ def parse_time(timestr: str) -> datetime:
         try:
             m = int(timestr.split('분')[0])
             return now - timedelta(minutes=m)
-        except:
-            return None
+        except: pass
     if '시간 전' in timestr:
         try:
             h = int(timestr.split('시간')[0])
             return now - timedelta(hours=h)
-        except:
-            return None
-    # 날짜 형식 YYYY.MM.DD.
+        except: pass
     m = re.match(r'(\d{4})\.(\d{2})\.(\d{2})\.', timestr)
     if m:
         y, mm, d = map(int, m.groups())
@@ -50,9 +47,9 @@ def parse_time(timestr: str) -> datetime:
 # —————————————————————————————————————————————————————————————————————————————
 def parse_newslist(
     html: str,
-    keywords: List[str] = DEFAULT_KEYWORDS,
-    search_mode: str = 'all',   # 'all' 또는 'major'
-    video_only: bool = False
+    keywords: List[str],
+    search_mode: str,
+    video_only: bool
 ) -> List[Dict]:
     soup = BeautifulSoup(html, 'html.parser')
     items = soup.select('ul.list_news > li')
@@ -61,13 +58,13 @@ def parse_newslist(
 
     for li in items:
         a = li.select_one('a.news_tit')
-        if not a:
-            continue
+        if not a: continue
         title = a['title'].strip()
         url   = a['href'].strip()
 
         press_elem = li.select_one('a.info.press')
-        press = press_elem.get_text(strip=True).replace('언론사 선정', '') if press_elem else ''
+        press = (press_elem.get_text(strip=True)
+                 .replace('언론사 선정','')) if press_elem else ''
 
         date_elem = li.select_one('span.info.date')
         pubstr = date_elem.get_text(strip=True) if date_elem else ''
@@ -79,28 +76,31 @@ def parse_newslist(
             continue
 
         if video_only:
-            if not li.select_one("a.news_tit[href*='tv.naver.com'], span.video"):
+            if not li.select_one(
+                "a.news_tit[href*='tv.naver.com'], span.video"
+            ):
                 continue
 
         desc_elem = li.select_one('div.news_dsc, div.api_txt_lines.dsc')
         desc = desc_elem.get_text(' ', strip=True) if desc_elem else ''
 
         hay = (title + ' ' + desc).lower()
-        kwcnt = {kw: hay.count(kw.lower()) for kw in keywords if hay.count(kw.lower())}
+        kwcnt = {kw: hay.count(kw.lower())
+                 for kw in (keywords or DEFAULT_KEYWORDS)
+                 if hay.count(kw.lower())}
         if not kwcnt:
             continue
 
         results.append({
-            'title': title,
-            'url': url,
-            'press': press,
-            'pubdate': pubtime.strftime('%Y-%m-%d %H:%M'),
-            'keywords': sorted(kwcnt.items(), key=lambda x: (-x[1], x[0])),
-            'kw_count': sum(kwcnt.values()),
+            'title':     title,
+            'url':       url,
+            'press':     press,
+            'pubdate':   pubtime.strftime('%Y-%m-%d %H:%M'),
+            'keywords':  sorted(kwcnt.items(), key=lambda x:(-x[1], x[0])),
+            'kw_count':  sum(kwcnt.values()),
         })
 
-    # 키워드 출현 수, 최신순 정렬
-    results.sort(key=lambda x: (-x['kw_count'], x['pubdate']), reverse=False)
+    results.sort(key=lambda x:(-x['kw_count'], x['pubdate']), reverse=False)
     return results
 
 # —————————————————————————————————————————————————————————————————————————————
@@ -119,23 +119,41 @@ def fetch_html(url: str) -> str:
     return resp.text
 
 # —————————————————————————————————————————————————————————————————————————————
-# 메인 실행부
+# FastAPI 애플리케이션
 # —————————————————————————————————————————————————————————————————————————————
-if __name__ == '__main__':
-    import sys
+app = FastAPI(title="Naver Mobile News Analyzer")
 
-    if len(sys.argv) < 2:
-        print('Usage: python news_analyzer.py <네이버 모바일 뉴스 URL>')
-        sys.exit(1)
+@app.get("/analyze")
+async def analyze(
+    url: str = Query(..., description="모바일 뉴스 검색 URL"),
+    mode: str = Query("all", regex="^(all|major)$", description="all 또는 major"),
+    video: bool = Query(False, description="동영상 뉴스만 필터링"),
+    kws: str = Query("", description="콤마로 구분된 키워드 (기본키워드 대신)")
+):
+    # 1) HTML 가져오기
+    try:
+        html = fetch_html(url)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"URL 요청 실패: {e}")
 
-    url = sys.argv[1]
-    print(f'Fetching: {url}\n')
-    html = fetch_html(url)
+    # 2) 키워드 리스트 처리
+    user_keywords = [k.strip() for k in kws.split(',') if k.strip()]
+    # 빈 문자열이면 None → parse 함수 내부에서 DEFAULT 사용
+    keywords = user_keywords if user_keywords else None
 
-    articles = parse_newslist(html, DEFAULT_KEYWORDS, search_mode='all', video_only=False)
-    if not articles:
-        print('>> 최근 4시간 이내 키워드 매칭 뉴스가 없습니다.')
-    else:
-        for i, art in enumerate(articles, 1):
-            print(f"{i}. [{art['pubdate']}] {art['press']} - {art['title']}")
-            print(f"   키워드출현: {art['keywords']}  링크: {art['url']}\n")
+    # 3) 뉴스 파싱
+    articles = parse_newslist(
+        html=html,
+        keywords=keywords,
+        search_mode=mode,
+        video_only=video
+    )
+
+    return {
+        "query_url": url,
+        "mode":      mode,
+        "video_only": video,
+        "keyword_list": keywords or DEFAULT_KEYWORDS,
+        "count":     len(articles),
+        "articles":  articles
+    }
