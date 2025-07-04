@@ -3,7 +3,7 @@
 
 import os
 import re
-import requests
+import httpx # requests 대신 httpx 임포트
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
@@ -166,9 +166,9 @@ def parse_newslist(
     results.sort(key=lambda x: (-x['kw_count'], x['pubdate'] if x['pubdate'] else ''), reverse=False)
     return results
 
-def fetch_html(url: str) -> str:
+async def fetch_html(url: str) -> str: # async 키워드 추가
     """
-    주어진 URL에서 HTML 내용을 가져옵니다.
+    주어진 URL에서 HTML 내용을 비동기적으로 가져옵니다.
     """
     logger.info(f"HTML 요청 시작: {url}")
     headers = {
@@ -179,14 +179,21 @@ def fetch_html(url: str) -> str:
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
     }
     try:
-        resp = requests.get(url, headers=headers, timeout=15) # 타임아웃 증가
-        resp.raise_for_status() # HTTP 오류 발생 시 예외 발생
-        logger.info(f"HTML 요청 성공. 상태 코드: {resp.status_code}")
-        logger.debug(f"응답 HTML 미리보기: {resp.text[:1000]}...")
-        return resp.text
-    except requests.exceptions.RequestException as e:
+        async with httpx.AsyncClient(timeout=15) as client: # httpx.AsyncClient 사용
+            resp = await client.get(url, headers=headers) # await 키워드 추가
+            resp.raise_for_status() # HTTP 오류 발생 시 예외 발생
+            logger.info(f"HTML 요청 성공. 상태 코드: {resp.status_code}")
+            logger.debug(f"응답 HTML 미리보기: {resp.text[:1000]}...")
+            return resp.text
+    except httpx.RequestError as e: # httpx.RequestError로 변경
         logger.error(f"URL '{url}' 요청 실패: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"URL 요청 실패: {e}")
+    except httpx.HTTPStatusError as e: # httpx.HTTPStatusError 추가
+        logger.error(f"URL '{url}' HTTP 상태 오류: {e.response.status_code} - {e.response.text[:500]}", exc_info=True)
+        raise HTTPException(status_code=e.response.status_code, detail=f"HTTP 상태 오류: {e.response.status_code}")
+    except Exception as e:
+        logger.error(f"예상치 못한 오류 발생: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"서버 내부 오류: {e}")
 
 # FastAPI 애플리케이션 인스턴스 생성
 app = FastAPI(
@@ -228,7 +235,7 @@ async def analyze_news(
     logger.info(f"'/analyze' 엔드포인트 호출됨. URL: {url}, 모드: {mode}, 비디오: {video}, 키워드: '{kws}'")
     
     try:
-        html_content = fetch_html(url)
+        html_content = await fetch_html(url) # await 키워드 추가
     except HTTPException as e:
         logger.error(f"HTML fetch_html 실패: {e.detail}")
         raise # fetch_html에서 발생한 HTTPException을 그대로 다시 발생시킴
@@ -262,4 +269,3 @@ if __name__ == "__main__":
     # app:app은 'app.py' 파일 내의 'app' 객체를 의미합니다.
     # --reload 옵션은 코드 변경 시 자동으로 서버를 재시작합니다.
     uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
-
