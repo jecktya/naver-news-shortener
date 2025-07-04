@@ -4,7 +4,6 @@ import json
 from datetime import datetime, timedelta
 from typing import List, Dict
 
-import asyncio
 from fastapi import FastAPI, Request, Form
 from fastapi.templating import Jinja2Templates
 from bs4 import BeautifulSoup
@@ -45,17 +44,23 @@ def parse_time(timestr: str) -> datetime:
 
 async def get_page_html(query: str, video_only: bool) -> str:
     url = f"https://m.search.naver.com/search.naver?ssc=tab.m_news.all&query={query}&sort=1&photo={'2' if video_only else '0'}"
+    print(">> [get_page_html] URL:", url)
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         await page.goto(url)
+        print(">> [get_page_html] Page loaded")
         content = await page.content()
+        print(">> [get_page_html] Content length:", len(content))
         await browser.close()
+        print(">> [get_page_html] Browser closed")
         return content
 
 def parse_news(html: str, keywords: List[str], mode: str, video_only: bool) -> List[Dict]:
+    print(">> [parse_news] called")
     soup = BeautifulSoup(html, 'html.parser')
     items = soup.select('ul.list_news > li')
+    print(">> [parse_news] Found items:", len(items))
     now = datetime.now()
     results: List[Dict] = []
     kw_source = keywords or DEFAULT_KEYWORDS
@@ -91,16 +96,20 @@ def parse_news(html: str, keywords: List[str], mode: str, video_only: bool) -> L
             'keywords': sorted(kwcnt.items(), key=lambda x:(-x[1], x[0])),
             'kw_count': sum(kwcnt.values())
         })
+    print(">> [parse_news] Returning", len(results), "results")
     results.sort(key=lambda x:(-x['kw_count'], x['pubdate']), reverse=False)
     return results
 
-# 실제 서비스에서는 Playwright로 naver.me 생성 로직 넣으세요!
 async def naver_me_shorten(orig_url: str) -> str:
+    # 실제 naver.me 단축주소 크롤링은 필요시 구현
     import random, string
-    return "https://naver.me/" + ''.join(random.choices(string.ascii_letters + string.digits, k=7))
+    short = "https://naver.me/" + ''.join(random.choices(string.ascii_letters + string.digits, k=7))
+    print(f">> [naver_me_shorten] {orig_url} -> {short}")
+    return short
 
 @app.get("/", include_in_schema=False)
 async def get_index(request: Request):
+    print(">> [GET /] index")
     return templates.TemplateResponse("index.html", {
         'request': request,
         'default_keywords': ', '.join(DEFAULT_KEYWORDS),
@@ -118,9 +127,13 @@ async def post_search(
     search_mode: str = Form('all'),
     video_only: str = Form(None)
 ):
+    print(f">> [POST /] keywords={keywords} search_mode={search_mode} video_only={video_only}")
     kw_list = [k.strip() for k in keywords.split(',') if k.strip()]
+    print(">> [POST /] kw_list:", kw_list)
     html = await get_page_html('+'.join(kw_list), bool(video_only))
+    print(">> [POST /] HTML fetched")
     final_results = parse_news(html, kw_list, search_mode, bool(video_only))
+    print(">> [POST /] parse_news results:", len(final_results))
     return templates.TemplateResponse("index.html", {
         'request': request,
         'final_results': final_results,
@@ -140,26 +153,22 @@ async def post_shorten(
     search_mode: str = Form('all'),
     video_only: str = Form(None)
 ):
+    print(">> [POST /shorten] selected_urls:", selected_urls)
     final_results = json.loads(final_results_json)
+    print(">> [POST /shorten] final_results loaded:", len(final_results))
     shortened_list = []
     for idx in selected_urls:
         try:
             orig = final_results[int(idx)]['url']
             short = await naver_me_shorten(orig)
             shortened_list.append(short)
-        except Exception:
-            pass
+        except Exception as e:
+            print("!! [POST /shorten] Error:", e)
+    print(">> [POST /shorten] shortened_list:", shortened_list)
     return templates.TemplateResponse("index.html", {
         'request': request,
         'final_results': final_results,
         'shortened': '\n'.join(shortened_list),
         'keyword_input': keyword_input,
         'default_keywords': ', '.join(DEFAULT_KEYWORDS),
-        'search_mode': search_mode,
-        'video_only': bool(video_only)
-    })
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get('PORT', 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
+        'search_mode': search_mo
