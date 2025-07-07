@@ -1,117 +1,39 @@
 import os
-import re
 import json
-from datetime import datetime, timedelta
-from typing import List, Dict
-
+import random, string
 from fastapi import FastAPI, Request, Form
 from fastapi.templating import Jinja2Templates
-from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
+import httpx
 
-app = FastAPI(title="뉴스검색기 (FastAPI+Playwright)")
+NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "YOUR_CLIENT_ID")
+NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
+NAVER_NEWS_API_URL = "https://openapi.naver.com/v1/search/news.json"
+
+app = FastAPI(title="뉴스검색기 (FastAPI+NaverAPI)")
 templates = Jinja2Templates(directory="templates")
 
 DEFAULT_KEYWORDS = [
     '육군', '국방', '외교', '안보', '북한', '신병', '교육대',
     '훈련', '간부', '장교', '부사관', '병사', '용사', '군무원'
 ]
-PRESS_MAJOR = {
-    '연합뉴스','조선일보','한겨레','중앙일보','MBN','KBS','SBS','YTN',
-    '동아일보','세계일보','문화일보','뉴시스','국민일보','국방일보',
-    '이데일리','뉴스1','JTBC'
-}
 
-def parse_time(timestr: str) -> datetime:
-    now = datetime.now()
-    if '분 전' in timestr:
-        try:
-            m = int(re.sub(r'[^0-9]', '', timestr))
-            return now - timedelta(minutes=m)
-        except:
-            return None
-    if '시간 전' in timestr:
-        try:
-            h = int(re.sub(r'[^0-9]', '', timestr))
-            return now - timedelta(hours=h)
-        except:
-            return None
-    m = re.match(r"(\d{4})\.(\d{2})\.(\d{2})\.", timestr)
-    if m:
-        y, mm, d = map(int, m.groups())
-        return datetime(y, mm, d)
-    return None
-
-async def get_page_html(query: str, video_only: bool) -> str:
-    url = f"https://m.search.naver.com/search.naver?ssc=tab.m_news.all&query={query}&sort=1&photo={'2' if video_only else '0'}"
-    print(">> [get_page_html] URL:", url)
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-        await page.goto(url)
-        print(">> [get_page_html] Page loaded")
-        content = await page.content()
-        print(">> [get_page_html] Content length:", len(content))
-        await browser.close()
-        print(">> [get_page_html] Browser closed")
-        return content
-
-def parse_news(html: str, keywords: List[str], mode: str, video_only: bool) -> List[Dict]:
-    print(">> [parse_news] called")
-    soup = BeautifulSoup(html, 'html.parser')
-    # 네이버 뉴스 블록 셀렉터 (앞부분 class 두 개만 사용)
-    items = soup.select('div.sds-comps-vertical-layout.sds-comps-full-layout')
-    print(">> [parse_news] Found items:", len(items))
-    now = datetime.now()
-    results: List[Dict] = []
-    kw_source = keywords or DEFAULT_KEYWORDS
-
-    for item in items:
-        # 제목/링크
-        a_headline = item.select_one('a span.sds-comps-text-type-headline1')
-        if not a_headline:
-            continue
-        title = a_headline.get_text(strip=True)
-        link = a_headline.find_parent('a')['href']
-
-        # 요약/본문
-        summary_span = item.select_one('span.sds-comps-text-type-body1')
-        desc = summary_span.get_text(strip=True) if summary_span else ''
-
-        # 언론사, 시간 정보는 네이버 뉴스 구조상 표기 안 될 수 있음
-        press = ''
-        pub = now
-
-        # 주요언론사 필터 (기존 로직 유지)
-        if mode == 'major' and press and press not in PRESS_MAJOR:
-            continue
-
-        # 동영상만 (해당 부분은 별도 구현 필요시)
-        if video_only:
-            continue
-
-        hay = (title + ' ' + desc).lower()
-        kwcnt = {kw: hay.count(kw.lower()) for kw in kw_source if hay.count(kw.lower())}
-        if not kwcnt:
-            continue
-        results.append({
-            'title': title,
-            'press': press,
-            'pubdate': pub.strftime('%Y-%m-%d %H:%M') if pub else '',
-            'url': link,
-            'desc': desc,
-            'keywords': sorted(kwcnt.items(), key=lambda x:(-x[1], x[0])),
-            'kw_count': sum(kwcnt.values())
-        })
-    print(">> [parse_news] Returning", len(results), "results")
-    results.sort(key=lambda x:(-x['kw_count'], x['pubdate']), reverse=False)
-    return results
-
-
+async def search_naver_news(query: str, display: int = 10):
+    headers = {
+        "X-Naver-Client-Id": NAVER_CLIENT_ID,
+        "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
+    }
+    params = {
+        "query": query,
+        "display": display,
+        "sort": "date",
+    }
+    async with httpx.AsyncClient() as client:
+        res = await client.get(NAVER_NEWS_API_URL, headers=headers, params=params)
+        res.raise_for_status()
+        return res.json().get("items", [])
 
 async def naver_me_shorten(orig_url: str) -> str:
     # 실제 naver.me 단축주소 크롤링은 필요시 구현
-    import random, string
     short = "https://naver.me/" + ''.join(random.choices(string.ascii_letters + string.digits, k=7))
     print(f">> [naver_me_shorten] {orig_url} -> {short}")
     return short
@@ -124,8 +46,6 @@ async def get_index(request: Request):
         {
             'request': request,
             'default_keywords': ', '.join(DEFAULT_KEYWORDS),
-            'search_mode': 'all',
-            'video_only': False,
             'keyword_input': '',
             'final_results': None,
             'shortened': None
@@ -136,16 +56,26 @@ async def get_index(request: Request):
 async def post_search(
     request: Request,
     keywords: str = Form(...),
-    search_mode: str = Form('all'),
-    video_only: str = Form(None)
 ):
-    print(f">> [POST /] keywords={keywords} search_mode={search_mode} video_only={video_only}")
+    print(f">> [POST /] keywords={keywords}")
     kw_list = [k.strip() for k in keywords.split(',') if k.strip()]
-    print(">> [POST /] kw_list:", kw_list)
-    html = await get_page_html('+'.join(kw_list), bool(video_only))
-    print(">> [POST /] HTML fetched")
-    final_results = parse_news(html, kw_list, search_mode, bool(video_only))
-    print(">> [POST /] parse_news results:", len(final_results))
+    if not kw_list:
+        kw_list = DEFAULT_KEYWORDS
+    query = " ".join(kw_list)
+    news_items = await search_naver_news(query)
+    # API 결과를 기존 파싱 결과와 맞춰서 구조 변환
+    final_results = []
+    for item in news_items:
+        final_results.append({
+            "title": item.get("title"),
+            "press": item.get("originallink", ""),  # 언론사 정보가 없어서 링크로 대체
+            "pubdate": item.get("pubDate", ""),
+            "url": item.get("link"),
+            "desc": item.get("description"),
+            "keywords": [],  # API 결과에는 키워드 카운트 없음
+            "kw_count": 0
+        })
+    print(">> [POST /] search_naver_news results:", len(final_results))
     return templates.TemplateResponse(
         "index.html",
         {
@@ -153,8 +83,6 @@ async def post_search(
             'final_results': final_results,
             'keyword_input': keywords,
             'default_keywords': ', '.join(DEFAULT_KEYWORDS),
-            'search_mode': search_mode,
-            'video_only': bool(video_only),
             'shortened': None
         }
     )
@@ -162,11 +90,9 @@ async def post_search(
 @app.post("/shorten", include_in_schema=False)
 async def post_shorten(
     request: Request,
-    selected_urls: List[str] = Form(...),
+    selected_urls: list = Form(...),
     final_results_json: str = Form(...),
-    keyword_input: str = Form(''),
-    search_mode: str = Form('all'),
-    video_only: str = Form(None)
+    keyword_input: str = Form('')
 ):
     print(">> [POST /shorten] selected_urls:", selected_urls)
     final_results = json.loads(final_results_json)
@@ -188,8 +114,6 @@ async def post_shorten(
             'shortened': '\n'.join(shortened_list),
             'keyword_input': keyword_input,
             'default_keywords': ', '.join(DEFAULT_KEYWORDS),
-            'search_mode': search_mode,
-            'video_only': bool(video_only)
         }
     )
 
