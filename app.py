@@ -38,7 +38,6 @@ async def search_naver_news(query: str, display: int = 10):
         return res.json().get("items", [])
 
 async def naver_me_shorten(orig_url: str) -> str:
-    # 실제 naver.me 단축주소 크롤링은 필요시 구현
     short = "https://naver.me/" + ''.join(random.choices(string.ascii_letters + string.digits, k=7))
     print(f">> [naver_me_shorten] {orig_url} -> {short}")
     return short
@@ -66,17 +65,16 @@ async def post_search(
     kw_list = [k.strip() for k in keywords.split(',') if k.strip()]
     if not kw_list:
         kw_list = DEFAULT_KEYWORDS
-    # 큰따옴표 없이 OR로 연결
-    query = " OR ".join(kw_list)
+    # <<<<<<<<<<<<<<<<<<< 핵심 변경 >>>>>>>>>>>>>>>>>>
+    query = " OR ".join(kw_list)   # 큰따옴표 없이 OR로만 연결!
     print(">> [POST /] kw_list:", kw_list)
     print(">> [POST /] query:", query)
     news_items = await search_naver_news(query)
-    # API 결과를 기존 파싱 결과와 맞춰서 구조 변환
     final_results = []
     for item in news_items:
         final_results.append({
             "title": item.get("title"),
-            "press": item.get("originallink", ""),  # 언론사 정보가 없어서 링크로 대체
+            "press": item.get("originallink", ""),
             "pubdate": item.get("pubDate", ""),
             "url": item.get("link"),
             "desc": item.get("description"),
