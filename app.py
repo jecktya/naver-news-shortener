@@ -5,7 +5,6 @@ from fastapi import FastAPI, Request, Form
 from fastapi.templating import Jinja2Templates
 import httpx
 
-# 환경변수 체크
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "YOUR_CLIENT_ID")
 NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
 print("="*35)
@@ -67,8 +66,8 @@ async def post_search(
     kw_list = [k.strip() for k in keywords.split(',') if k.strip()]
     if not kw_list:
         kw_list = DEFAULT_KEYWORDS
-    # 모든 키워드를 큰따옴표로 감싸고 OR로 연결: "육군" OR "국방" OR "외교" ...
-    query = " OR ".join([f'"{kw}"' for kw in kw_list])
+    # 큰따옴표 없이 OR로 연결
+    query = " OR ".join(kw_list)
     print(">> [POST /] kw_list:", kw_list)
     print(">> [POST /] query:", query)
     news_items = await search_naver_news(query)
