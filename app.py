@@ -5,8 +5,14 @@ from fastapi import FastAPI, Request, Form
 from fastapi.templating import Jinja2Templates
 import httpx
 
+# 환경변수 체크용 로그 (서버 시작 시 1회 출력)
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "YOUR_CLIENT_ID")
 NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
+print("="*35)
+print(f"NAVER_CLIENT_ID: {NAVER_CLIENT_ID}")
+print(f"NAVER_CLIENT_SECRET: {NAVER_CLIENT_SECRET[:4]}{'*'*(len(NAVER_CLIENT_SECRET)-4)}")
+print("="*35)
+
 NAVER_NEWS_API_URL = "https://openapi.naver.com/v1/search/news.json"
 
 app = FastAPI(title="뉴스검색기 (FastAPI+NaverAPI)")
@@ -62,6 +68,8 @@ async def post_search(
     if not kw_list:
         kw_list = DEFAULT_KEYWORDS
     query = " ".join(kw_list)
+    print(">> [POST /] kw_list:", kw_list)
+    print(">> [POST /] query:", query)
     news_items = await search_naver_news(query)
     # API 결과를 기존 파싱 결과와 맞춰서 구조 변환
     final_results = []
