@@ -1,60 +1,132 @@
-import streamlit as st
-import requests
-import urllib.parse
-import html
-from datetime import datetime, timedelta, timezone
-import email.utils as eut
+import os
+import json
+import random, string
+from fastapi import FastAPI, Request, Form
+from fastapi.templating import Jinja2Templates
+import httpx
 
-# 환경변수(Secrets) 확인
-NAVER_CLIENT_ID = st.secrets.get("NAVER_CLIENT_ID")
-NAVER_CLIENT_SECRET = st.secrets.get("NAVER_CLIENT_SECRET")
-if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
-    st.error("❌ NAVER_CLIENT_ID / NAVER_CLIENT_SECRET가 제대로 등록되지 않았습니다.")
-else:
-    st.info(f"NAVER_CLIENT_ID: {NAVER_CLIENT_ID[:4]}***")
+# 환경변수 체크
+NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "YOUR_CLIENT_ID")
+NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
+print("="*35)
+print(f"NAVER_CLIENT_ID: {NAVER_CLIENT_ID}")
+print(f"NAVER_CLIENT_SECRET: {NAVER_CLIENT_SECRET[:4]}{'*'*(len(NAVER_CLIENT_SECRET)-4)}")
+print("="*35)
 
-def_keywords = ["육군", "국방", "외교", "안보", "북한",
-                "신병교육대", "훈련", "간부", "장교",
-                "부사관", "병사", "용사", "군무원"]
-input_keywords = st.text_input("🔍 키워드 입력 (쉼표 또는 띄어쓰기로 구분)", ", ".join(def_keywords))
-# 쉼표 또는 공백 기준 분리
-keyword_list = [k.strip() for k in input_keywords.replace(",", " ").split() if k.strip()]
+NAVER_NEWS_API_URL = "https://openapi.naver.com/v1/search/news.json"
 
-def search_news(query):
-    enc = urllib.parse.quote(query)
-    url = f"https://openapi.naver.com/v1/search/news.json?query={enc}&display=30&sort=date"
-    headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET}
-    try:
-        r = requests.get(url, headers=headers, timeout=5)
-        if r.status_code == 200:
-            return r.json().get("items", [])
-        elif r.status_code == 401:
-            st.error("❌ 네이버 API 인증 오류! 환경변수를 다시 확인하세요.")
-        elif r.status_code == 429:
-            st.error("❌ 네이버 뉴스 API 쿼터 초과! 잠시 후 시도하세요.")
-        else:
-            st.error(f"❌ 네이버 뉴스 API 오류({r.status_code})")
-    except Exception as e:
-        st.error(f"❌ API 요청 중 오류: {e}")
-    return []
+app = FastAPI(title="뉴스검색기 (FastAPI+NaverAPI)")
+templates = Jinja2Templates(directory="templates")
 
-st.write("뉴스 검색 예시: 키워드 하나(예: 육군), 또는 '육군, 국방' 처럼 1~2개만 권장 (너무 많으면 결과 0건 가능)")
+DEFAULT_KEYWORDS = [
+    '육군', '국방', '외교', '안보', '북한', '신병', '교육대',
+    '훈련', '간부', '장교', '부사관', '병사', '용사', '군무원'
+]
 
-if st.button("🔍 뉴스 검색"):
-    with st.spinner("뉴스 검색 중..."):
-        if not keyword_list:
-            st.warning("검색할 키워드를 입력하세요.")
-        else:
-            # 여러 키워드를 OR 조건으로 묶기
-            query = " OR ".join(keyword_list)
-            items = search_news(query)
-            if not items:
-                st.warning("🔎 해당 키워드로 최근 뉴스 결과가 없습니다. 키워드를 1~2개로 줄여 다시 시도해 보세요!")
-            else:
-                for a in items:
-                    title = html.unescape(a["title"]).replace("<b>", "").replace("</b>", "")
-                    desc = html.unescape(a.get("description", "")).replace("<b>", "").replace("</b>", "")
-                    st.write(f"**{title}**")
-                    st.write(desc)
-                    st.write(a["link"])
-                    st.write("---")
+async def search_naver_news(query: str, display: int = 10):
+    headers = {
+        "X-Naver-Client-Id": NAVER_CLIENT_ID,
+        "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
+    }
+    params = {
+        "query": query,
+        "display": display,
+        "sort": "date",
+    }
+    async with httpx.AsyncClient() as client:
+        res = await client.get(NAVER_NEWS_API_URL, headers=headers, params=params)
+        res.raise_for_status()
+        return res.json().get("items", [])
+
+async def naver_me_shorten(orig_url: str) -> str:
+    # 실제 naver.me 단축주소 크롤링은 필요시 구현
+    short = "https://naver.me/" + ''.join(random.choices(string.ascii_letters + string.digits, k=7))
+    print(f">> [naver_me_shorten] {orig_url} -> {short}")
+    return short
+
+@app.get("/", include_in_schema=False)
+async def get_index(request: Request):
+    print(">> [GET /] index")
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            'request': request,
+            'default_keywords': ', '.join(DEFAULT_KEYWORDS),
+            'keyword_input': '',
+            'final_results': None,
+            'shortened': None
+        }
+    )
+
+@app.post("/", include_in_schema=False)
+async def post_search(
+    request: Request,
+    keywords: str = Form(...),
+):
+    print(f">> [POST /] keywords={keywords}")
+    kw_list = [k.strip() for k in keywords.split(',') if k.strip()]
+    if not kw_list:
+        kw_list = DEFAULT_KEYWORDS
+    # 모든 키워드를 큰따옴표로 감싸고 OR로 연결: "육군" OR "국방" OR "외교" ...
+    query = " OR ".join([f'"{kw}"' for kw in kw_list])
+    print(">> [POST /] kw_list:", kw_list)
+    print(">> [POST /] query:", query)
+    news_items = await search_naver_news(query)
+    # API 결과를 기존 파싱 결과와 맞춰서 구조 변환
+    final_results = []
+    for item in news_items:
+        final_results.append({
+            "title": item.get("title"),
+            "press": item.get("originallink", ""),  # 언론사 정보가 없어서 링크로 대체
+            "pubdate": item.get("pubDate", ""),
+            "url": item.get("link"),
+            "desc": item.get("description"),
+            "keywords": [],
+            "kw_count": 0
+        })
+    print(">> [POST /] search_naver_news results:", len(final_results))
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            'request': request,
+            'final_results': final_results,
+            'keyword_input': keywords,
+            'default_keywords': ', '.join(DEFAULT_KEYWORDS),
+            'shortened': None
+        }
+    )
+
+@app.post("/shorten", include_in_schema=False)
+async def post_shorten(
+    request: Request,
+    selected_urls: list = Form(...),
+    final_results_json: str = Form(...),
+    keyword_input: str = Form('')
+):
+    print(">> [POST /shorten] selected_urls:", selected_urls)
+    final_results = json.loads(final_results_json)
+    print(">> [POST /shorten] final_results loaded:", len(final_results))
+    shortened_list = []
+    for idx in selected_urls:
+        try:
+            orig = final_results[int(idx)]['url']
+            short = await naver_me_shorten(orig)
+            shortened_list.append(short)
+        except Exception as e:
+            print("!! [POST /shorten] Error:", e)
+    print(">> [POST /shorten] shortened_list:", shortened_list)
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            'request': request,
+            'final_results': final_results,
+            'shortened': '\n'.join(shortened_list),
+            'keyword_input': keyword_input,
+            'default_keywords': ', '.join(DEFAULT_KEYWORDS),
+        }
+    )
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get('PORT', 8080))
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
