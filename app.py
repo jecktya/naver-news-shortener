@@ -392,7 +392,7 @@ async def post_search(
             processed_results.append({
                 "title": title,
                 "press": press,
-                "pubdate": parsed_pubdate, # datetime 객체로 저장
+                "pubdate": parsed_pubdate, # datetime 객체로 저장 (정렬용)
                 "pubdate_display": parsed_pubdate.strftime('%Y-%m-%d %H:%M') if parsed_pubdate else pubdate_str, # 표시용 문자열
                 "url": url,
                 "desc": desc,
@@ -421,11 +421,21 @@ async def post_search(
         logger.error(error_message, exc_info=True)
         msg = f"오류 발생: {e}"
 
+    # final_results를 템플릿으로 전달하기 전에 pubdate를 문자열로 변환
+    # JSON 직렬화 오류를 방지하기 위함
+    serializable_final_results = []
+    for item in final_results:
+        serializable_item = item.copy() # 원본 딕셔너리 변경 방지
+        if serializable_item['pubdate'] is not None:
+            serializable_item['pubdate'] = serializable_item['pubdate'].isoformat() # ISO 8601 문자열로 변환
+        serializable_final_results.append(serializable_item)
+
+
     return templates.TemplateResponse(
         "news_search.html", # <-- news_search.html 렌더링
         {
             'request': request,
-            'final_results': final_results,
+            'final_results': serializable_final_results, # 직렬화된 결과 전달
             'keyword_input': keywords,
             'default_keywords': ', '.join(DEFAULT_KEYWORDS),
             'msg': msg,
@@ -455,7 +465,20 @@ async def post_shorten(
     final_results = []
     error_message = None
     try:
-        final_results = json.loads(final_results_json)
+        # JSON 문자열을 파싱할 때, pubdate 필드가 ISO 문자열로 되어 있을 것이므로,
+        # 다시 datetime 객체로 변환하여 내부 로직(정렬 등)에서 사용할 수 있도록 합니다.
+        parsed_json_results = json.loads(final_results_json)
+        for item in parsed_json_results:
+            if 'pubdate' in item and item['pubdate']:
+                try:
+                    item['pubdate'] = datetime.fromisoformat(item['pubdate'])
+                except ValueError:
+                    logger.warning(f"JSON에서 pubdate 파싱 실패: {item['pubdate']}. 문자열로 유지.")
+                    item['pubdate'] = None # 파싱 실패 시 None으로 설정하여 정렬 오류 방지
+            else:
+                item['pubdate'] = None # pubdate가 없거나 비어 있으면 None으로 설정
+
+        final_results = parsed_json_results
         logger.info(f"JSON 로드 완료. 총 {len(final_results)}개 결과.")
     except json.JSONDecodeError as e:
         error_message = f"검색 결과 JSON 파싱 오류: {e}"
@@ -509,11 +532,21 @@ async def post_shorten(
     if shortened_list:
         msg += f" (단축 성공: {len(shortened_list) - len(shorten_fail_list)}건, 실패: {len(shorten_fail_list)}건)"
 
+    # final_results를 템플릿으로 전달하기 전에 pubdate를 문자열로 다시 변환
+    # JSON 직렬화 오류를 방지하기 위함
+    serializable_final_results_for_template = []
+    for item in final_results:
+        serializable_item = item.copy()
+        if 'pubdate' in serializable_item and serializable_item['pubdate'] is not None:
+            serializable_item['pubdate'] = serializable_item['pubdate'].isoformat()
+        serializable_final_results_for_template.append(serializable_item)
+
+
     return templates.TemplateResponse(
         "news_search.html", # <-- news_search.html 렌더링
         {
             'request': request,
-            'final_results': final_results, # 이전 검색 결과를 그대로 유지하여 다시 표시
+            'final_results': serializable_final_results_for_template, # 직렬화된 결과 전달
             'shortened': '\n\n'.join(shortened_list),
             'shorten_fail': shorten_fail_list, # 실패 목록 전달
             'keyword_input': keyword_input,
