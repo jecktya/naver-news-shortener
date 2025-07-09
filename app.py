@@ -15,6 +15,7 @@ import httpx
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
+# 로거 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,6 @@ async def search_naver_news(query: str, display: int = 10):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="네이버 API 키가 설정되지 않았습니다. 환경 변수 'NAVER_CLIENT_ID'와 'NAVER_CLIENT_SECRET'을 확인해주세요."
         )
-
     headers = {
         "X-Naver-Client-Id": NAVER_CLIENT_ID,
         "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
@@ -112,32 +112,64 @@ async def search_naver_news(query: str, display: int = 10):
             detail=f"서버 내부 오류: {e}"
         )
 
-async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
-    from playwright.async_api import async_playwright 
+# ---- 아래 함수가 핵심! (Streamlit식 합산) ----
+async def search_naver_news_multi_keywords(kw_list, display=10):
+    """
+    키워드별로 각각 네이버 뉴스 API를 호출하여 결과를 합치고,
+    기사별로 어떤 키워드를 포함하는지, 몇 개 포함하는지까지 분석한다.
+    """
+    all_articles = {}
+    for kw in kw_list:
+        items = await search_naver_news(kw, display)
+        for a in items:
+            url = a.get("link", "")
+            if not (url.startswith("https://n.news.naver.com/") or url.startswith("https://m.entertain.naver.com/")):
+                continue
+            if url not in all_articles:
+                all_articles[url] = {
+                    "title": a.get("title", "").replace("<b>", "").replace("</b>", ""),
+                    "press": a.get("publisher", ""),
+                    "pubdate": a.get("pubDate", ""),
+                    "url": url,
+                    "desc": a.get("description", "").replace("<b>", "").replace("</b>", ""),
+                    "matched": set(),
+                }
+            all_articles[url]["matched"].add(kw)
+    articles = []
+    for v in all_articles.values():
+        v["matched"] = sorted(v["matched"])
+        v["kw_count"] = len(v["matched"])
+        articles.append(v)
+    articles = sorted(
+        articles,
+        key=lambda x: (x["kw_count"], x["pubdate"]),
+        reverse=True
+    )
+    return articles
 
+async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
+    from playwright.async_api import async_playwright
     logger.info(f"naver.me 단축 URL 변환 시도 시작. 원본 URL: {orig_url}")
+
     if not (orig_url.startswith("https://n.news.naver.com/") or \
             orig_url.startswith("https://m.entertain.naver.com/")):
         logger.warning(f"naver.me 단축 URL 대상 아님. 지원하지 않는 도메인: {orig_url}")
         return orig_url, "지원하지 않는 네이버 도메인 (n.news.naver.com 또는 m.entertain.naver.com만 지원)"
+
     browser = None
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True, 
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--disable-gpu',
-                    '--start-maximized'
-                ]
-            )
+            browser = await p.chromium.launch(headless=True, args=[
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--disable-gpu',
+                '--start-maximized'
+            ])
             iphone_13_user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
             iphone_13_viewport = {"width": 428, "height": 926}
-
             page = await browser.new_page(
                 viewport=iphone_13_viewport, 
                 user_agent=iphone_13_user_agent
@@ -145,19 +177,14 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
             logger.info(f"Playwright 페이지 생성 완료. User-Agent: {iphone_13_user_agent}, Viewport: {iphone_13_viewport}")
 
             await page.goto(orig_url, timeout=20000)
-            await page.wait_for_load_state('networkidle')   # <== 수정된 부분 (오타 fix)
+            await page.wait_for_load_state('networkidle')
             logger.info(f"페이지 로드 완료 및 networkidle 상태 대기 완료: {orig_url}")
             await asyncio.sleep(random.uniform(2.0, 4.0))
 
             share_button_selectors = [
-                "span.u_hc",
-                "span:has-text('SNS 보내기')",
-                "#m-toolbar-navernews-share-btn",
-                "#toolbar .tool_share",
-                "button[aria-label*='공유']",
-                "button[data-tooltip-contents='공유하기']",
-                "a[href*='share']",
-                "button.Nicon_share, a.Nicon_share"
+                "span.u_hc", "span:has-text('SNS 보내기')", "#m-toolbar-navernews-share-btn",
+                "#toolbar .tool_share", "button[aria-label*='공유']", "button[data-tooltip-contents='공유하기']",
+                "a[href*='share']", "button.Nicon_share, a.Nicon_share"
             ]
             share_button_found = False
             for selector in share_button_selectors:
@@ -169,18 +196,15 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
                         logger.info(f"공유 버튼 클릭 성공 (선택자: {selector}).")
                         share_button_found = True
                         break
-                    else:
-                        logger.debug(f"선택자 '{selector}'의 요소가 보이지 않거나 활성화되지 않았습니다.")
                 except Exception as e:
                     logger.debug(f"공유 버튼 선택자 '{selector}' 대기 또는 클릭 실패: {e}")
                     continue
             if not share_button_found:
                 logger.warning("모든 공유 버튼 선택자 시도 실패. 공유 버튼을 찾을 수 없습니다.")
                 return orig_url, "공유 버튼을 찾을 수 없음"
-            
+
             logger.info("공유 팝업 대기 중...")
             await asyncio.sleep(random.uniform(1.5, 3.0))
-
             link_elem_selectors = [
                 "button[data-url^='https://naver.me/']",
                 "span[data-url^='https://naver.me/']",
@@ -210,14 +234,9 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
                             short_link = link
                             logger.info(f"단축 URL 변환 성공 (선택자: {selector}, 최종 URL: {short_link})")
                             break
-                        else:
-                            logger.debug(f"선택자 '{selector}'에서 naver.me 주소를 찾지 못했습니다. (링크: {link})")
-                    else:
-                        logger.debug(f"선택자 '{selector}'의 단축 URL 요소가 보이지 않습니다.")
                 except Exception as e:
                     logger.debug(f"단축 URL 요소 선택자 '{selector}' 대기 실패: {e}")
                     continue
-
             if short_link:
                 return short_link, ""
             else:
@@ -263,82 +282,55 @@ async def post_search(
     if not kw_list:
         kw_list = DEFAULT_KEYWORDS
         logger.info("키워드가 없어 기본 키워드 사용.")
-    
-    query = " OR ".join(kw_list) 
-    logger.info(f"네이버 API 검색 쿼리: '{query}'")
 
-    final_results = []
-    error_message = None
-    msg = ""
+    # >>> Streamlit 스타일(키워드별 검색, 합산)
+    all_results = await search_naver_news_multi_keywords(kw_list)
 
-    try:
-        news_items = await search_naver_news(query)
-        filtered_news_items_by_domain = []
-        for item in news_items:
-            link = item.get("link", "")
-            if link.startswith("https://n.news.naver.com/") or \
-               link.startswith("https://m.entertain.naver.com/"):
-                filtered_news_items_by_domain.append(item)
-            else:
-                logger.debug(f"외부 도메인 기사 제외됨: {link}")
+    # 추가 필터링
+    processed_results = []
+    for item in all_results:
+        title = item["title"]
+        press = item["press"]
+        url = item["url"]
+        desc = item["desc"]
+        pubdate_str = item.get("pubdate", "")
+        matched_keywords = item["matched"]
+        kw_count = item["kw_count"]
 
-        processed_results = []
-        for item in filtered_news_items_by_domain:
-            title = item.get("title", "").replace("<b>", "").replace("</b>", "")
-            press = item.get("publisher", "")
-            url = item.get("link", "")
-            desc = item.get("description", "").replace("<b>", "").replace("</b>", "")
-            pubdate_str = item.get("pubDate", "")
+        # 2개 이상 키워드 포함 필터링
+        if checked_two_keywords == "on" and kw_count < 2:
+            continue
 
-            kwcnt = {}
-            for kw in kw_list:
-                pat = re.compile(re.escape(kw), re.IGNORECASE)
-                c = pat.findall(title + " " + desc)
-                if c: kwcnt[kw] = len(c)
-
-            if checked_two_keywords == "on" and len(kwcnt) < 2:
-                logger.debug(f"2개 이상 키워드 필터링: '{title}'. 키워드 부족. 제외됨.")
+        # 주요 언론사 필터링
+        if search_mode == "major" and press:
+            if press.lower() not in [p.lower() for p in PRESS_MAJOR]:
                 continue
 
-            if search_mode == "major" and press:
-                if press.lower() not in [p.lower() for p in PRESS_MAJOR]:
-                    logger.debug(f"주요 언론사 필터링: '{title}' - {press}. 제외됨.")
-                    continue
+        # 동영상만 필터링(구현 필요시 추가)
 
-            if video_only == "on":
-                pass 
+        # pubDate 파싱
+        parsed_pubdate = parse_api_pubdate(pubdate_str)
 
-            parsed_pubdate = parse_api_pubdate(pubdate_str)
-            
-            processed_results.append({
-                "title": title,
-                "press": press,
-                "pubdate": parsed_pubdate,
-                "pubdate_display": parsed_pubdate.strftime('%Y-%m-%d %H:%M') if parsed_pubdate else pubdate_str,
-                "url": url,
-                "desc": desc,
-                "keywords": sorted(kwcnt.items(), key=lambda x:(-x[1], x[0])),
-                "kw_count": sum(kwcnt.values())
-            })
-        
-        processed_results.sort(key=lambda x: (-x['kw_count'], x['pubdate'] if x['pubdate'] is not None else datetime.min), reverse=False)
-        final_results = processed_results
-        
-        msg = f"총 {len(final_results)}건의 뉴스가 검색되었습니다."
-        if not final_results:
-            msg = "검색된 뉴스가 없습니다. 키워드나 필터링 조건을 다시 확인해주세요."
+        processed_results.append({
+            "title": title,
+            "press": press,
+            "pubdate": parsed_pubdate,
+            "pubdate_display": parsed_pubdate.strftime('%Y-%m-%d %H:%M') if parsed_pubdate else pubdate_str,
+            "url": url,
+            "desc": desc,
+            "keywords": matched_keywords,
+            "kw_count": kw_count
+        })
 
-        logger.info(f"네이버 뉴스 검색 결과 (최종 필터링 후): 총 {len(final_results)}건.")
+    # 정렬
+    processed_results.sort(key=lambda x: (-x['kw_count'], x['pubdate'] if x['pubdate'] else datetime.min), reverse=False)
+    final_results = processed_results
+    msg = f"총 {len(final_results)}건의 뉴스가 검색되었습니다."
+    if not final_results:
+        msg = "검색된 뉴스가 없습니다. 키워드나 필터링 조건을 다시 확인해주세요."
+    logger.info(f"네이버 뉴스 검색 결과 (최종 필터링 후): 총 {len(final_results)}건.")
 
-    except HTTPException as e:
-        error_message = f"뉴스 검색 중 오류 발생: {e.detail}"
-        logger.error(error_message)
-        msg = f"오류 발생: {e.detail}"
-    except Exception as e:
-        error_message = f"예상치 못한 오류 발생: {e}"
-        logger.error(error_message, exc_info=True)
-        msg = f"오류 발생: {e}"
-
+    # 직렬화
     serializable_final_results = []
     for item in final_results:
         serializable_item = item.copy()
@@ -359,7 +351,7 @@ async def post_search(
             'video_only': video_only == "on",
             'shortened': None,
             'shorten_fail': [],
-            'error_message': error_message
+            'error_message': None
         }
     )
 
@@ -405,4 +397,61 @@ async def post_shorten(
                 selected_articles_info.append(final_results[idx])
                 tasks.append(naver_me_shorten(final_results[idx]['url']))
             else:
-                logger.warning(f"유효하지 않은 인덱스 선택됨: {idx_str}. 총 결과 수: {len(final_results)}
+                logger.warning(f"유효하지 않은 인덱스 선택됨: {idx_str}. 총 결과 수: {len(final_results)}")
+                shorten_fail_list.append(f"유효하지 않은 뉴스 선택 (인덱스: {idx_str})")
+        except ValueError:
+            logger.error(f"선택된 URL 인덱스 파싱 오류: '{idx_str}'는 정수가 아닙니다.", exc_info=True)
+            shorten_fail_list.append(f"선택된 뉴스 인덱스 형식이 잘못됨 (값: {idx_str})")
+        except Exception as e:
+            logger.error(f"URL 선택 처리 중 예상치 못한 오류 발생: {e}", exc_info=True)
+            shorten_fail_list.append(f"URL 선택 처리 중 오류: {e}")
+
+    if not tasks and not shorten_fail_list:
+        logger.warning("단축 변환할 선택된 기사가 없습니다.")
+        error_message = "단축할 뉴스를 선택해주세요."
+
+    if tasks:
+        shorten_results = await asyncio.gather(*tasks)
+        for i, (short_url, fail_reason) in enumerate(shorten_results):
+            art = selected_articles_info[i]
+            if fail_reason:
+                shorten_fail_list.append(f"'{art['title']}': {fail_reason}")
+                logger.error(f"'{art['title']}' 단축 변환 실패: {fail_reason}")
+            else:
+                line = f"■ {art['title']} ({art['press']})\n{short_url}"
+                shortened_list.append(line)
+                logger.info(f"'{art['title']}' 단축 변환 성공.")
+    logger.info(f"URL 단축 처리 완료. 성공: {len(shortened_list)}건, 실패: {len(shorten_fail_list)}건")
+
+    msg = f"총 {len(final_results)}건의 뉴스가 검색되었습니다."
+    if shortened_list:
+        msg += f" (단축 성공: {len(shortened_list) - len(shorten_fail_list)}건, 실패: {len(shorten_fail_list)}건)"
+
+    serializable_final_results_for_template = []
+    for item in final_results:
+        serializable_item = item.copy()
+        if 'pubdate' in serializable_item and serializable_item['pubdate'] is not None:
+            serializable_item['pubdate'] = serializable_item['pubdate'].isoformat()
+        serializable_final_results_for_template.append(serializable_item)
+
+    return templates.TemplateResponse(
+        "news_search.html",
+        {
+            'request': request,
+            'final_results': serializable_final_results_for_template,
+            'shortened': '\n\n'.join(shortened_list),
+            'shorten_fail': shorten_fail_list,
+            'keyword_input': keyword_input,
+            'default_keywords': ', '.join(DEFAULT_KEYWORDS),
+            'msg': msg,
+            'checked_two_keywords': checked_two_keywords == "on",
+            'search_mode': search_mode,
+            'video_only': video_only == "on",
+            'error_message': error_message
+        }
+    )
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get('PORT', 8080))
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
