@@ -1,6 +1,7 @@
 import os
 import asyncio
 import re
+import json
 from fastapi import FastAPI, Request, Form
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
@@ -9,7 +10,6 @@ from playwright.async_api import async_playwright
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# 검색 기본 키워드
 DEFAULT_KEYWORDS = [
     '육군', '국방', '외교', '안보', '북한', '신병', '교육대',
     '훈련', '간부', '장교', '부사관', '병사', '용사', '군무원'
@@ -19,15 +19,19 @@ NAVER_NEWS_API_URL = "https://openapi.naver.com/v1/search/news.json"
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "YOUR_NAVER_CLIENT_ID_HERE")
 NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "YOUR_NAVER_CLIENT_SECRET_HERE")
 
-async def search_naver_news(keywords: str, display: int = 10):
-    import httpx
-    # 쉼표, 스페이스, 엔터 전부 분리 허용
+def parse_keywords(keywords):
+    # 쉼표 또는 공백 또는 엔터 기준 분리
     if ',' in keywords:
         kw_list = [k.strip() for k in keywords.split(',') if k.strip()]
     else:
         kw_list = [k.strip() for k in re.split(r'[\s]+', keywords) if k.strip()]
     if not kw_list:
         kw_list = DEFAULT_KEYWORDS
+    return kw_list
+
+async def search_naver_news(keywords: str, display: int = 10):
+    import httpx
+    kw_list = parse_keywords(keywords)
     query = ' OR '.join(kw_list)
     headers = {
         "X-Naver-Client-Id": NAVER_CLIENT_ID,
@@ -52,7 +56,6 @@ async def get_naverme_from_news(url: str) -> str:
         page = await browser.new_page(viewport=iphone_vp, user_agent=iphone_ua)
         await page.goto(url, timeout=20000)
         await asyncio.sleep(2)
-        # 공유버튼(실패해도 그냥 진행)
         try:
             await page.click("span.u_hc", timeout=3000)
             await asyncio.sleep(1.5)
@@ -123,7 +126,6 @@ async def post_shorten(
     results_json: str = Form(...),
     keyword_input: str = Form(''),
 ):
-    import json
     try:
         selected = json.loads(selected_urls)
         results = json.loads(results_json)
