@@ -2,74 +2,203 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>📰 네이버 뉴스검색기 + 단축주소</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>뉴스 검색기 (Naver API)</title>
+    <!-- Tailwind CSS CDN 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts - Inter 로드 (깔끔한 디자인을 위해) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family:'Malgun Gothic',sans-serif; background:#f9f9f9; margin:40px; }
-        form { margin-bottom:20px; }
-        label, select, input[type=text], button { font-size:1em; }
-        select, input[type=text] { padding:6px; border:1px solid #ccc; border-radius:4px; }
-        button { padding:6px 12px; margin-left:8px; background:#4287f5; color:#fff; border:none; border-radius:4px; cursor:pointer; }
-        button:hover { opacity:0.9; }
-        table { width:100%; border-collapse:collapse; margin-top:10px; }
-        th, td { border:1px solid #ddd; padding:8px; text-align:left; }
-        th { background:#f2f2f2; }
-        textarea { width:100%; height:120px; font-size:1em; padding:8px; border:1px solid #ccc; border-radius:4px; }
-        hr { margin:24px 0; border:none; border-top:1px solid #eee; }
+        /* 기본 폰트 설정 */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* 배경색 */
+            color: #333; /* 기본 글자색 */
+        }
+        /* 컨테이너 최대 너비 설정 */
+        .container {
+            max-width: 960px;
+        }
+        /* 기본 버튼 스타일 (파란색 계열) */
+        .btn-primary {
+            background-color: #4f46e5; /* 인디고 500 */
+            color: white;
+            padding: 0.75rem 1.5rem; /* py-3 px-6 */
+            border-radius: 0.5rem; /* rounded-lg */
+            font-weight: 600; /* font-semibold */
+            transition: background-color 0.2s; /* 호버 효과 */
+        }
+        .btn-primary:hover {
+            background-color: #4338ca; /* 인디고 600 */
+        }
+        /* 보조 버튼 스타일 (회색 계열) */
+        .btn-secondary {
+            background-color: #6b7280; /* 그레이 500 */
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            transition: background-color 0.2s;
+        }
+        .btn-secondary:hover {
+            background-color: #4b5563; /* 그레이 600 */
+        }
+        /* 뉴스 카드 스타일 */
+        .news-card {
+            background-color: white;
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* shadow-md */
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            transition: transform 0.2s ease-in-out; /* 부드러운 호버 효과 */
+        }
+        .news-card:hover {
+            transform: translateY(-3px); /* 위로 살짝 올라오는 효과 */
+        }
+        .news-card a {
+            color: #4f46e5; /* 링크 색상 */
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .news-card a:hover {
+            text-decoration: underline; /* 호버 시 밑줄 */
+        }
+        /* 체크박스 컨테이너 스타일 */
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .checkbox-container input[type="checkbox"] {
+            margin-right: 0.5rem;
+            width: 1.25rem; /* 20px */
+            height: 1.25rem; /* 20px */
+            border-radius: 0.25rem; /* 4px */
+            border: 1px solid #d1d5db; /* 그레이 300 */
+            appearance: none; /* 기본 브라우저 스타일 제거 */
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            cursor: pointer;
+            position: relative;
+            flex-shrink: 0; /* 체크박스 크기 고정 */
+        }
+        .checkbox-container input[type="checkbox"]:checked {
+            background-color: #4f46e5; /* 인디고 500 */
+            border-color: #4f46e5;
+        }
+        .checkbox-container input[type="checkbox"]:checked::after {
+            content: '✔'; /* 체크 표시 */
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 0.875rem; /* 14px */
+        }
+        .checkbox-container label {
+            cursor: pointer;
+            font-size: 1rem;
+            color: #374151; /* 그레이 700 */
+        }
     </style>
 </head>
-<body>
-    <h1>📰 네이버 뉴스검색기 + 단축주소</h1>
-    <form method="post" action="/">
-        <label>🗂️ 검색 유형:</label>
-        <select name="search_mode">
-            <option value="all" {% if search_mode == 'all' %}selected{% endif %}>전체</option>
-            <option value="major" {% if search_mode == 'major' %}selected{% endif %}>주요언론사만</option>
-        </select>
-        <label style="margin-left:20px;"><input type="checkbox" name="video_only" value="on" {% if video_only %}checked{% endif %}> 동영상만</label>
-        <br><br>
-        <label>🔍 키워드 (쉼표로 구분):</label><br>
-        <input type="text" name="keywords" style="width:400px;" value="{{ keyword_input or '' }}" placeholder="{{ default_keywords }}">
-        <button type="submit">🔍 검색</button>
-    </form>
+<body class="p-4">
+    <div class="container mx-auto bg-white p-6 rounded-lg shadow-xl mt-8">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">뉴스 검색기 (Naver API)</h1>
 
-    {% if final_results %}
-    <hr>
-    <h2>🔎 검색 결과</h2>
-    <form method="post" action="/shorten">
-        <table>
-            <tr>
-                <th>선택</th>
-                <th>No</th>
-                <th>제목</th>
-                <th>언론사</th>
-                <th>시간</th>
-                <th>원본 URL</th>
-            </tr>
-            {% for art in final_results %}
-            <tr>
-                <td><input type="checkbox" name="selected_urls" value="{{ loop.index0 }}" checked></td>
-                <td>{{ loop.index }}</td>
-                <td>{{ art.title|safe }}</td>
-                <td>{{ art.press }}</td>
-                <td>{{ art.pubdate }}</td>
-                <td><a href="{{ art.url }}" target="_blank">원본</a></td>
-            </tr>
-            {% endfor %}
-        </table>
-        <input type="hidden" name="final_results_json" value='{{ final_results|tojson|safe }}'>
-        <input type="hidden" name="keyword_input" value="{{ keyword_input }}">
-        <input type="hidden" name="search_mode" value="{{ search_mode }}">
-        <input type="hidden" name="video_only" value="{{ video_only }}">
-        <button type="submit">🔗 단축 주소 생성</button>
-    </form>
-    {% endif %}
+        <!-- 에러 메시지 표시 영역 -->
+        {% if error_message %}
+        <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+            <strong class="font-bold">오류:</strong>
+            <span class="block sm:inline">{{ error_message }}</span>
+        </div>
+        {% endif %}
 
-    {% if shortened %}
-    <hr>
-    <h2>🔗 단축 주소 결과</h2>
-    <textarea readonly>{{ shortened }}</textarea>
-    {% endif %}
+        <!-- 뉴스 검색 폼 -->
+        <form action="/" method="post" class="mb-8 p-6 bg-gray-50 rounded-lg shadow-inner">
+            <div class="mb-4">
+                <label for="keywords" class="block text-gray-700 text-sm font-bold mb-2">
+                    검색 키워드 (콤마로 구분, 예: {{ default_keywords }})
+                </label>
+                <input type="text" id="keywords" name="keywords"
+                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-indigo-500"
+                       value="{{ keyword_input }}" placeholder="키워드를 입력하세요">
+            </div>
+            <div class="flex justify-center">
+                <button type="submit" class="btn-primary">뉴스 검색</button>
+            </div>
+        </form>
 
-    <p style="margin-top:30px;"><a href="/">🏠 홈으로 돌아가기</a></p>
+        <!-- 검색 결과 및 URL 단축 폼 -->
+        {% if final_results is not none %}
+        <h2 class="text-2xl font-bold text-gray-800 mb-4">검색 결과 (총 {{ final_results|length }}건)</h2>
+        
+        {% if final_results|length == 0 %}
+            <p class="text-gray-600 text-center mb-6">검색 결과가 없습니다. 다른 키워드로 시도해 보세요.</p>
+        {% else %}
+            <form action="/shorten" method="post" class="mb-8">
+                <!-- 선택된 뉴스 데이터를 JSON 문자열로 숨겨서 전달 -->
+                <input type="hidden" name="final_results_json" value="{{ final_results | tojson }}">
+                <!-- 이전 검색 키워드도 숨겨서 전달 -->
+                <input type="hidden" name="keyword_input" value="{{ keyword_input }}">
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <!-- 각 뉴스 아이템을 반복하여 표시 -->
+                    {% for item in final_results %}
+                    <div class="news-card flex items-start">
+                        <!-- 체크박스 (loop.index0는 0부터 시작하는 현재 반복 인덱스) -->
+                        <div class="checkbox-container mr-4">
+                            <input type="checkbox" id="url_{{ loop.index0 }}" name="selected_urls" value="{{ loop.index0 }}">
+                            <label for="url_{{ loop.index0 }}"></label>
+                        </div>
+                        <!-- 뉴스 내용 -->
+                        <div class="flex-grow">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-1">
+                                <!-- 제목 클릭 시 원본 뉴스로 이동 -->
+                                <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title | safe }}</a>
+                            </h3>
+                            <p class="text-sm text-gray-600 mb-1">{{ item.press }} | {{ item.pubdate }}</p>
+                            <p class="text-sm text-gray-700">{{ item.desc | safe }}</p>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <!-- URL 단축 버튼 -->
+                <div class="flex justify-center mt-6">
+                    <button type="submit" class="btn-secondary">선택된 뉴스 URL 단축</button>
+                </div>
+            </form>
+        {% endif %}
+        {% endif %}
+
+        <!-- 단축된 URL 표시 영역 -->
+        {% if shortened %}
+        <div class="mt-8 p-6 bg-blue-50 rounded-lg shadow-md">
+            <h2 class="text-2xl font-bold text-blue-800 mb-4">단축된 URL</h2>
+            <!-- 단축된 URL이 표시될 텍스트 영역 (읽기 전용) -->
+            <textarea readonly class="w-full h-48 p-4 border border-blue-300 rounded-lg bg-white text-gray-800 resize-y focus:outline-none focus:ring-2 focus:ring-blue-500">{{ shortened }}</textarea>
+            <!-- 클립보드 복사 버튼 -->
+            <button onclick="copyToClipboard()" class="btn-primary mt-4 w-full">클립보드에 복사</button>
+            <!-- 복사 완료 메시지 -->
+            <p id="copyMessage" class="text-green-600 text-center mt-2 hidden">복사되었습니다!</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        // 클립보드 복사 함수
+        function copyToClipboard() {
+            const textarea = document.querySelector('textarea');
+            textarea.select(); // 텍스트 영역의 내용을 선택
+            document.execCommand('copy'); // 선택된 내용을 클립보드에 복사 (navigator.clipboard.writeText() 대신 사용)
+            
+            // 복사 완료 메시지 표시
+            const message = document.getElementById('copyMessage');
+            message.classList.remove('hidden');
+            setTimeout(() => {
+                message.classList.add('hidden'); // 2초 후 메시지 숨김
+            }, 2000);
+        }
+    </script>
 </body>
 </html>
