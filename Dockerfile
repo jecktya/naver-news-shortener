@@ -9,42 +9,28 @@ WORKDIR /app
 
 # 3. 시스템 의존성 설치: Playwright 브라우저 실행에 필요한 시스템 라이브러리들을 설치합니다.
 #    이 단계는 Playwright를 requirements.txt에 포함했을 때 필수적입니다.
-#    --no-install-recommends: 추천 패키지 설치를 비활성화하여 이미지 크기 최적화
+#    `apt-get update`와 `apt-get install`을 한 줄에 작성하여 캐시 문제를 방지합니다.
+#    Playwright 공식 문서에서 권장하는 핵심 의존성 목록을 사용합니다.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libnss3 \
-    libxss1 \
+    fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \
     libgtk-3-0 \
-    libgdk-pixbuf2.0-0 \
-    libfontconfig1 \
-    libjpeg-turbo8 \
-    libwebp6 \
-    libpng16-16 \
-    libglib2.0-0 \
-    libharfbuzz0b \
-    libfreetype6 \
-    libxkbcommon0 \
+    libnspr4 \
+    libnss3 \
+    libx11-xcb1 \
     libxcomposite1 \
     libxdamage1 \
+    libxext6 \
     libxfixes3 \
+    libxkbcommon0 \
     libxrandr2 \
     libxrender1 \
-    libxi6 \
-    libxcursor1 \
-    libxext6 \
-    libxinerama1 \
-    libxmu6 \
-    libxpm4 \
+    libxss1 \
     libxtst6 \
-    libappindicator1 \
-    libdbus-glib-1-2 \
-    libindicator7 \
-    fonts-liberation \
     xdg-utils \
-    # 기타 필요한 라이브러리 (예: Playwright가 필요로 할 수 있는 추가 폰트 등)
-    # && apt-get install -y --no-install-recommends fonts-noto-cjk
     # apt 캐시 정리 (이미지 크기 최적화)
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # 4. requirements.txt 복사 및 Python 의존성 설치:
