@@ -182,13 +182,13 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
             # await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "stylesheet", "font"] else route.continue())
 
             await page.goto(orig_url, timeout=20000) # 페이지 로드 타임아웃 증가 (20초)
-            logger.info(f"페이지 로드 완료: {orig_url}")
-            await asyncio.sleep(random.uniform(2.5, 4.5)) # 페이지 로드 후 충분히 대기
+            # 페이지의 모든 네트워크 요청이 완료될 때까지 대기
+            await page.wait_for_loadstate('networkidle') 
+            logger.info(f"페이지 로드 완료 및 networkidle 상태 대기 완료: {orig_url}")
+            await asyncio.sleep(random.uniform(2.0, 4.0)) # 추가적인 안정화를 위한 대기
 
             # --- 공유 버튼 찾기 및 클릭 ---
-            logger.info("공유 버튼 찾기 시도 시작.") # 추가된 로깅
-            # 네이버 모바일 웹의 공유 버튼은 '.u_hc' 또는 'sns 보내기' 텍스트를 가진 span 태그이거나,
-            # 툴바에 있는 공유 아이콘일 수 있습니다. 여러 선택자를 시도합니다.
+            logger.info("공유 버튼 찾기 시도 시작.")
             share_button_selectors = [
                 "span.u_hc",                                   # 일반적인 공유 아이콘 클래스
                 "span:has-text('SNS 보내기')",                  # 텍스트 기반 검색
@@ -204,15 +204,15 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
             for selector in share_button_selectors:
                 logger.debug(f"공유 버튼 선택자 시도 중: {selector}")
                 try:
-                    # 요소가 나타날 때까지 대기하고, 나타나면 가져옵니다.
-                    btn = await page.wait_for_selector(selector, timeout=7000, state='visible') # 요소가 'visible' 상태가 될 때까지 대기
-                    if btn and await btn.is_visible(): # 실제로 보이는지 다시 확인
-                        await btn.click(timeout=3000) # 클릭 시 타임아웃 설정
+                    # 요소가 나타나고 클릭 가능할 때까지 대기
+                    btn = await page.wait_for_selector(selector, timeout=7000, state='visible') 
+                    if btn and await btn.is_enabled(): # 버튼이 활성화되어 있는지 확인
+                        await btn.click(timeout=3000)
                         logger.info(f"공유 버튼 클릭 성공 (선택자: {selector}).")
                         share_button_found = True
                         break
                     else:
-                        logger.debug(f"선택자 '{selector}'의 요소가 보이지 않습니다.")
+                        logger.debug(f"선택자 '{selector}'의 요소가 보이지 않거나 활성화되지 않았습니다.")
                 except Exception as e:
                     logger.debug(f"공유 버튼 선택자 '{selector}' 대기 또는 클릭 실패: {e}")
                     # 디버깅을 위해 실패 시 스크린샷 저장 (로컬에서만 사용 권장)
@@ -225,12 +225,11 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
                 # await page.screenshot(path="share_button_not_found_final.png") 
                 return orig_url, "공유 버튼을 찾을 수 없음"
             
-            logger.info("공유 팝업 대기 중...") # 추가된 로깅
+            logger.info("공유 팝업 대기 중...")
             await asyncio.sleep(random.uniform(1.5, 3.0)) # 공유 팝업이 뜨는 것을 대기
 
             # --- 단축 URL 요소 찾기 ---
-            logger.info("단축 URL 요소 찾기 시도 시작.") # 추가된 로깅
-            # 공유 팝업 내에서 naver.me 단축 URL을 포함하는 요소를 찾습니다.
+            logger.info("단축 URL 요소 찾기 시도 시작.")
             link_elem_selectors = [
                 "button[data-url^='https://naver.me/']",     # data-url 속성으로 naver.me 주소 바로 찾기 (버튼)
                 "span[data-url^='https://naver.me/']",       # data-url 속성으로 naver.me 주소 바로 찾기 (span)
@@ -248,6 +247,7 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
             for selector in link_elem_selectors:
                 logger.debug(f"단축 URL 요소 선택자 시도 중: {selector}")
                 try:
+                    # 요소가 나타나고 텍스트를 포함할 때까지 대기
                     link_elem = await page.wait_for_selector(selector, timeout=6000, state='visible')
                     if link_elem and await link_elem.is_visible():
                         link = await link_elem.get_attribute("data-url") # data-url 속성 먼저 시도
