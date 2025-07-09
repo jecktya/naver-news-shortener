@@ -31,8 +31,12 @@ logger.info("="*35)
 
 NAVER_NEWS_API_URL = "https://openapi.naver.com/v1/search/news.json"
 
-app = FastAPI(title="뉴스검색기 (FastAPI+NaverAPI)")
+# Jinja2Templates 초기화 시 enumerate를 글로벌 함수로 추가
 templates = Jinja2Templates(directory="templates")
+templates.env.globals["enumerate"] = enumerate # enumerate 함수를 Jinja2 환경에 추가
+
+app = FastAPI(title="뉴스검색기 (FastAPI+NaverAPI)")
+
 
 DEFAULT_KEYWORDS = [
     '육군', '국방', '외교', '안보', '북한', '신병', '교육대',
@@ -492,4 +496,4 @@ async def post_shorten(
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get('PORT', 8080))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True
