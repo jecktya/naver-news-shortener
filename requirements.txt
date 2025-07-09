@@ -18,8 +18,11 @@ beautifulsoup4
 jinja2
 
 # 웹 자동화 라이브러리 (naver.me 단축 변환에 필요)
-# 특정 버전 명시: playwright==1.52.0
+# 특정 버전 명시: playwright
 playwright
+
+# Starlette Session Middleware의 의존성
+itsdangerous
 
 # 아래 라이브러리들은 현재 앱 코드에서 직접 사용되지 않거나,
 # 다른 패키지에 포함되어 있을 수 있습니다.
@@ -34,10 +37,5 @@ playwright
 # 언어 감지 라이브러리 (현재 코드에서 사용되지 않음)
 # langdetect
 
-# Starlette Session Middleware (FastAPI의 세션 관리에 필요하며,
-# python-multipart는 uvicorn[standard]에 포함될 수 있습니다.)
-# python-multipart # uvicorn[standard]에 포함될 가능성 있음
-
-# 안전한 데이터 직렬화/역직렬화 (FastAPI의 SessionMiddleware 등에서 사용될 수 있으나,
-# 직접적인 명시가 필요 없을 수 있음)
-# itsdangerous
+# python-multipart는 uvicorn[standard]에 포함될 가능성 있음
+# python-multipart 
