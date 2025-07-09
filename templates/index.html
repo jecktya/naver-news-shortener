@@ -39,6 +39,7 @@
         <table>
             <tr>
                 <th>선택</th>
+                <th>No</th>
                 <th>제목</th>
                 <th>언론사</th>
                 <th>시간</th>
@@ -47,6 +48,7 @@
             {% for art in final_results %}
             <tr>
                 <td><input type="checkbox" name="selected_urls" value="{{ loop.index0 }}" checked></td>
+                <td>{{ loop.index }}</td>
                 <td>{{ art.title|safe }}</td>
                 <td>{{ art.press }}</td>
                 <td>{{ art.pubdate }}</td>
