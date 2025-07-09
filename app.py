@@ -62,10 +62,6 @@ def parse_newslist(html:str, keywords:List[str], search_mode:str, video_only:boo
 
     for card in news_cards:
         # 뉴스 제목과 링크 추출 (다양한 선택자 시도)
-        # a.news_tit: 모바일 뉴스 제목 링크
-        # a.tit: 일반적인 제목 링크
-        # a[role='text']: 접근성 역할 기반 링크
-        # .news_area .title a: 특정 영역 내 제목 링크
         a = card.select_one("a.news_tit, a.tit, a[role='text'], .news_area .title a")
         if not a: 
             logger.debug(f"뉴스 제목/링크 요소를 찾을 수 없습니다. 카드 스킵: {card.prettify()[:200]}...")
@@ -74,26 +70,14 @@ def parse_newslist(html:str, keywords:List[str], search_mode:str, video_only:boo
         url = a["href"]
 
         # 언론사 이름 추출 (다양한 선택자 시도)
-        # .info.press: 모바일 뉴스 언론사 정보
-        # .press: 일반적인 언론사 클래스
-        # ._sp_each_info: 스페셜 영역 정보
-        # .news_info .press: 뉴스 정보 영역 내 언론사
         press = card.select_one(".info.press, .press, ._sp_each_info, .news_info .press")
         press_name = press.get_text(strip=True).replace("언론사 선정", "").replace("언론사", "").strip() if press else ""
         
         # 뉴스 본문 요약 추출 (다양한 선택자 시도)
-        # .dsc_wrap: 모바일 뉴스 요약
-        # .desc: 일반적인 요약 클래스
-        # .api_txt_lines.dsc: API 텍스트 라인 요약
-        # .news_dsc: 뉴스 요약
         desc = card.select_one(".dsc_wrap, .desc, .api_txt_lines.dsc, .news_dsc")
         desc_txt = desc.get_text(" ", strip=True) if desc else ""
         
         # 발행일 추출 및 시간 필터링 (최근 4시간 이내)
-        # .info_group .date: 모바일 뉴스 날짜 그룹
-        # .info .date: 일반적인 날짜 정보
-        # ._sp_each_date: 스페셜 영역 날짜
-        # .news_info .date: 뉴스 정보 영역 내 날짜
         pubdate = card.select_one(".info_group .date, .info .date, ._sp_each_date, .news_info .date")
         pub_str = pubdate.get_text(strip=True) if pubdate else ""
         pub_kst = parse_time(pub_str)
@@ -110,11 +94,6 @@ def parse_newslist(html:str, keywords:List[str], search_mode:str, video_only:boo
         # 동영상 뉴스만 필터링
         if video_only:
             # 동영상 뉴스를 나타내는 특정 요소나 URL 패턴 확인
-            # a.news_thumb[href*='tv.naver.com']: 네이버 TV 링크 썸네일
-            # a.news_thumb[href*='video.naver.com']: 네이버 비디오 링크 썸네일
-            # span[class*=video]: 'video' 클래스를 포함하는 span
-            # ._playing_area: 재생 영역
-            # .sp_thmb_video: 비디오 썸네일
             if not card.select_one("a.news_thumb[href*='tv.naver.com'], a.news_thumb[href*='video.naver.com'], span[class*='video'], ._playing_area, .sp_thmb_video"):
                 logger.debug(f"동영상 필터링: '{title}'. 동영상 아님. 제외됨.")
                 continue
@@ -229,9 +208,12 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
     from playwright.async_api import async_playwright 
 
     logger.info(f"naver.me 단축 URL 변환 시도 시작. 원본 URL: {orig_url}")
-    if not orig_url.startswith("https://n.news.naver.com/"): 
-        logger.warning("naver.me 단축 URL 대상 아님. n.news.naver.com 주소가 아님.")
-        return orig_url, "n.news.naver.com 주소가 아님"
+    
+    # URL 검사 조건 확장: n.news.naver.com 또는 m.entertain.naver.com 허용
+    if not (orig_url.startswith("https://n.news.naver.com/") or \
+            orig_url.startswith("https://m.entertain.naver.com/")):
+        logger.warning(f"naver.me 단축 URL 대상 아님. 지원하지 않는 도메인: {orig_url}")
+        return orig_url, "지원하지 않는 네이버 도메인 (n.news.naver.com 또는 m.entertain.naver.com만 지원)"
     
     browser = None # browser 객체 초기화 (finally 블록에서 닫기 위함)
     try:
@@ -250,7 +232,7 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
                     '--start-maximized' # 브라우저 창을 최대화하여 요소를 더 잘 찾도록 함
                 ]
             )
-            # User-Agent 설정: 네이버 모바일 뉴스 페이지에 접근하므로 모바일 UA가 유리할 수 있습니다.
+            # User-Agent 설정: 네이버 모바일 페이지에 접근하므로 모바일 UA가 유리할 수 있습니다.
             current_user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
             
             page = await browser.new_page(
@@ -267,7 +249,7 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
             await asyncio.sleep(random.uniform(2.5, 4.5)) # 페이지 로드 후 충분히 대기
 
             # --- 공유 버튼 찾기 및 클릭 ---
-            # 네이버 뉴스 모바일 웹의 공유 버튼은 '.u_hc' 또는 'sns 보내기' 텍스트를 가진 span 태그이거나,
+            # 네이버 모바일 웹의 공유 버튼은 '.u_hc' 또는 'sns 보내기' 텍스트를 가진 span 태그이거나,
             # 툴바에 있는 공유 아이콘일 수 있습니다. 여러 선택자를 시도합니다.
             share_button_selectors = [
                 "span.u_hc",                                   # 일반적인 공유 아이콘 클래스
@@ -276,7 +258,8 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
                 "#toolbar .tool_share",                        # PC 버전 툴바의 공유 버튼
                 "button[aria-label*='공유']",                   # 접근성 라벨 기반
                 "button[data-tooltip-contents='공유하기']",      # 새로운 속성 기반
-                "a[href*='share']"                             # 공유 링크 자체를 찾아볼 수도
+                "a[href*='share']",                            # 공유 링크 자체를 찾아볼 수도
+                "button.Nicon_share, a.Nicon_share"            # 엔터테인먼트 뉴스 등에서 사용될 수 있는 공유 버튼
             ]
             
             share_button_found = False
@@ -315,7 +298,8 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
                 "#clipBtn",                                   # 클립보드 복사 버튼 ID
                 "._clipUrlBtn",                               # 클립보드 복사 버튼 클래스
                 "input[readonly][value^='https://naver.me/']", # 읽기 전용 input 필드에 URL이 있을 경우
-                "div.share_url_area .url_item"                # URL 텍스트가 직접 표시되는 영역
+                "div.share_url_area .url_item",               # URL 텍스트가 직접 표시되는 영역
+                "div.url_copy_area input[type='text']"        # 엔터테인먼트 뉴스 등에서 사용될 수 있는 URL 복사 input
             ]
             
             short_link = None
