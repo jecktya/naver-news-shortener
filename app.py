@@ -3,7 +3,7 @@ import asyncio
 import re
 from fastapi import FastAPI, Request, Form
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from playwright.async_api import async_playwright
 
 app = FastAPI()
@@ -21,12 +21,10 @@ NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "YOUR_NAVER_CLIENT_S
 
 async def search_naver_news(keywords: str, display: int = 10):
     import httpx
-    # 키워드 전처리: 쉼표/엔터/공백 모두 분리
-    kw_list = []
+    # 쉼표, 스페이스, 엔터 전부 분리 허용
     if ',' in keywords:
         kw_list = [k.strip() for k in keywords.split(',') if k.strip()]
     else:
-        # 스페이스/엔터 구분일 때도 분리
         kw_list = [k.strip() for k in re.split(r'[\s]+', keywords) if k.strip()]
     if not kw_list:
         kw_list = DEFAULT_KEYWORDS
@@ -54,7 +52,7 @@ async def get_naverme_from_news(url: str) -> str:
         page = await browser.new_page(viewport=iphone_vp, user_agent=iphone_ua)
         await page.goto(url, timeout=20000)
         await asyncio.sleep(2)
-        # 공유버튼(여러 방식 시도)
+        # 공유버튼(실패해도 그냥 진행)
         try:
             await page.click("span.u_hc", timeout=3000)
             await asyncio.sleep(1.5)
