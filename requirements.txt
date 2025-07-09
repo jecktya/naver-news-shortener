@@ -4,38 +4,33 @@
 # FastAPI 웹 프레임워크
 fastapi
 
-# 웹 서버 (ASGI)
-# uvicorn[standard]는 uvicorn과 함께 필요한 표준 라이브러리 (예: python-multipart)를 설치합니다.
+# 비동기 웹 서버 (ASGI) - 표준 설치에는 python-multipart 포함
 uvicorn[standard]
 
-# 비동기 HTTP 클라이언트 (웹 스크래핑 및 API 호출에 사용)
+# 비동기 HTTP 클라이언트
 httpx
 
-# HTML/XML 파싱 라이브러리 (웹 스크래핑에 사용)
+# HTML/XML 파싱 라이브러리
 beautifulsoup4
 
-# Jinja2 템플릿 엔진 (UI 렌더링에 필요)
+# Jinja2 템플릿 엔진 (이전 UI 버전에 사용되었을 수 있음)
 jinja2
 
-# 웹 자동화 라이브러리 (naver.me 단축 변환에 필요)
-# 특정 버전 명시: playwright
-playwright
+# 웹 자동화 라이브러리 (버전 명시)
+playwright==1.44.0
 
-# Starlette Session Middleware의 의존성
+# Multipart/form-data 파싱 (uvicorn[standard]에 포함될 수 있음)
+python-multipart
+
+# 안전한 데이터 직렬화/역직렬화 (FastAPI의 SessionMiddleware 등에서 사용될 수 있음)
 itsdangerous
 
-# 아래 라이브러리들은 현재 앱 코드에서 직접 사용되지 않거나,
-# 다른 패키지에 포함되어 있을 수 있습니다.
-# 필요에 따라 추가하거나 제거할 수 있습니다.
-
+# --- 아래 라이브러리들은 현재 app.py 코드에서 직접 사용되지 않으므로 제거하거나 주석 처리할 수 있습니다. ---
 # 동기 HTTP 클라이언트 (httpx로 대체됨)
 # requests
 
-# RSS/Atom 피드 파싱 라이브러리 (현재 코드에서 사용되지 않음)
+# RSS/Atom 피드 파싱 라이브러리
 # feedparser
 
-# 언어 감지 라이브러리 (현재 코드에서 사용되지 않음)
+# 언어 감지 라이브러리
 # langdetect
-
-# python-multipart는 uvicorn[standard]에 포함될 가능성 있음
-python-multipart 
