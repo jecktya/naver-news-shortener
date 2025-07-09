@@ -44,10 +44,10 @@
                 <th>시간</th>
                 <th>원본 URL</th>
             </tr>
-            {% for idx, art in enumerate(final_results) %}
+            {% for art in final_results %}
             <tr>
-                <td><input type="checkbox" name="selected_urls" value="{{ idx }}" checked></td>
-                <td>{{ art.title }}</td>
+                <td><input type="checkbox" name="selected_urls" value="{{ loop.index0 }}" checked></td>
+                <td>{{ art.title|safe }}</td>
                 <td>{{ art.press }}</td>
                 <td>{{ art.pubdate }}</td>
                 <td><a href="{{ art.url }}" target="_blank">원본</a></td>
