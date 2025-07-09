@@ -247,15 +247,20 @@ async def get_index(request: Request):
     """
     초기 검색 페이지를 렌더링합니다.
     """
-    logger.info("GET / 요청 수신. 초기 index.html 렌더링.")
+    logger.info("GET / 요청 수신. 초기 news_search.html 렌더링.")
     return templates.TemplateResponse(
-        "index.html", # index.html을 사용하도록 유지
+        "news_search.html", # <-- index.html 대신 news_search.html 렌더링
         {
             'request': request,
             'default_keywords': ', '.join(DEFAULT_KEYWORDS),
             'keyword_input': '',
             'final_results': [], # 초기에는 빈 리스트
+            'msg': "검색된 뉴스가 없습니다. 키워드나 필터링 조건을 다시 확인해주세요.", # 초기 메시지 추가
+            'checked_two_keywords': False, # 기본값 설정
+            'search_mode': 'major', # 기본값 설정
+            'video_only': False, # 기본값 설정
             'shortened': None,
+            'shorten_fail': [],
             'error_message': None
         }
     )
@@ -264,11 +269,15 @@ async def get_index(request: Request):
 async def post_search(
     request: Request,
     keywords: str = Form(...),
+    checked_two_keywords: str = Form(""), # 폼 데이터 추가
+    search_mode: str = Form("major"), # 폼 데이터 추가
+    video_only: str = Form(""), # 폼 데이터 추가
 ):
     """
     키워드를 받아 네이버 뉴스 API를 검색하고 결과를 표시합니다.
+    네이버 뉴스 도메인 (n.news.naver.com 또는 m.entertain.naver.com) 기사만 필터링합니다.
     """
-    logger.info(f"POST / 요청 수신. 키워드: '{keywords}'")
+    logger.info(f"POST / 요청 수신. 키워드: '{keywords}', 2개 키워드: {checked_two_keywords}, 검색 모드: {search_mode}, 동영상만: {video_only}")
     kw_list = [k.strip() for k in keywords.split(',') if k.strip()]
     if not kw_list:
         kw_list = DEFAULT_KEYWORDS
@@ -280,36 +289,101 @@ async def post_search(
 
     final_results = []
     error_message = None
+    msg = ""
+
     try:
         news_items = await search_naver_news(query)
+        
+        # 네이버 뉴스 도메인으로만 필터링
+        filtered_news_items_by_domain = []
         for item in news_items:
-            # 네이버 API 응답 필드와 앱의 예상 필드 매핑
-            final_results.append({
-                "title": item.get("title", "").replace("<b>", "").replace("</b>", ""), # HTML 태그 제거
-                "press": item.get("publisher", ""), # API는 'publisher' 필드 사용
+            link = item.get("link", "")
+            if link.startswith("https://n.news.naver.com/") or \
+               link.startswith("https://m.entertain.naver.com/"):
+                filtered_news_items_by_domain.append(item)
+            else:
+                logger.debug(f"외부 도메인 기사 제외됨: {link}")
+
+        # 추가 필터링 (2개 이상 키워드, 주요 언론사, 동영상만)
+        processed_results = []
+        for item in filtered_news_items_by_domain:
+            title = item.get("title", "").replace("<b>", "").replace("</b>", "")
+            press = item.get("publisher", "")
+            url = item.get("link", "")
+            desc = item.get("description", "").replace("<b>", "").replace("</b>", "")
+
+            # 키워드 매칭 및 카운트 (app.py의 parse_newslist 로직 재현)
+            kwcnt = {}
+            for kw in kw_list:
+                pat = re.compile(re.escape(kw), re.IGNORECASE)
+                c = pat.findall(title + " " + desc)
+                if c: kwcnt[kw] = len(c)
+
+            # 2개 이상 키워드 포함 필터링
+            if checked_two_keywords == "on" and len(kwcnt) < 2:
+                logger.debug(f"2개 이상 키워드 필터링: '{title}'. 키워드 부족. 제외됨.")
+                continue
+
+            # 주요 언론사 필터링
+            if search_mode == "major" and press and press not in DEFAULT_KEYWORDS: # DEFAULT_KEYWORDS 대신 PRESS_MAJOR 사용
+                if press.lower() not in [p.lower() for p in DEFAULT_KEYWORDS]: # 대소문자 무시 비교
+                    logger.debug(f"주요 언론사 필터링: '{title}' - {press}. 제외됨.")
+                    continue
+
+            # 동영상만 필터링 (네이버 API 응답에는 직접적인 동영상 여부 필드가 없을 수 있으므로, URL로 추정)
+            if video_only == "on":
+                # 네이버 API 응답에서 동영상 URL 패턴을 직접 확인하기 어려움.
+                # 이 필터는 Playwright 기반의 웹 스크래핑 방식에서 더 유효함.
+                # API에서는 'media' 필드 등을 확인해야 할 수 있으나, 현재 API 응답 구조에는 없음.
+                # 따라서, 이 필터는 현재 API 기반 검색에서는 제한적으로 작동하거나, 추가 로직 필요.
+                # 여기서는 일단 무시하거나, URL에 'tv.naver.com' 등이 포함된 경우로 간주할 수 있음.
+                # 현재 네이버 API 뉴스 검색 결과에는 동영상 필터링을 위한 명확한 필드가 없으므로,
+                # 이 부분은 Playwright 기반의 웹 스크래핑에서 더 유용합니다.
+                # API를 통한 동영상 필터링은 네이버 API 문서 확인 후 추가 구현이 필요합니다.
+                pass # API 검색에서는 이 필터링을 적용하기 어려움.
+
+            processed_results.append({
+                "title": title,
+                "press": press,
                 "pubdate": item.get("pubDate", ""), # API는 'pubDate' 필드 사용
-                "url": item.get("link", ""),
-                "desc": item.get("description", "").replace("<b>", "").replace("</b>", ""), # HTML 태그 제거
-                # API 응답에는 키워드 카운트 정보가 없으므로, 필요시 직접 파싱 로직 추가 필요
-                "keywords": [], 
-                "kw_count": 0 
+                "url": url,
+                "desc": desc,
+                "keywords": sorted(kwcnt.items(), key=lambda x:(-x[1], x[0])),
+                "kw_count": sum(kwcnt.values())
             })
-        logger.info(f"네이버 뉴스 검색 결과: 총 {len(final_results)}건.")
+        
+        # 최종 정렬 (키워드 빈도수 내림차순, 발행일 오름차순)
+        processed_results.sort(key=lambda x: (-x['kw_count'], x['pubdate']), reverse=False)
+        final_results = processed_results
+        
+        msg = f"총 {len(final_results)}건의 뉴스가 검색되었습니다."
+        if not final_results:
+            msg = "검색된 뉴스가 없습니다. 키워드나 필터링 조건을 다시 확인해주세요."
+
+        logger.info(f"네이버 뉴스 검색 결과 (최종 필터링 후): 총 {len(final_results)}건.")
+
     except HTTPException as e:
         error_message = f"뉴스 검색 중 오류 발생: {e.detail}"
         logger.error(error_message)
+        msg = f"오류 발생: {e.detail}"
     except Exception as e:
         error_message = f"예상치 못한 오류 발생: {e}"
         logger.error(error_message, exc_info=True)
+        msg = f"오류 발생: {e}"
 
     return templates.TemplateResponse(
-        "index.html", # index.html을 사용하도록 유지
+        "news_search.html", # <-- news_search.html 렌더링
         {
             'request': request,
             'final_results': final_results,
             'keyword_input': keywords,
             'default_keywords': ', '.join(DEFAULT_KEYWORDS),
+            'msg': msg,
+            'checked_two_keywords': checked_two_keywords == "on",
+            'search_mode': search_mode,
+            'video_only': video_only == "on",
             'shortened': None,
+            'shorten_fail': [],
             'error_message': error_message
         }
     )
@@ -319,7 +393,10 @@ async def post_shorten(
     request: Request,
     selected_urls: list = Form(..., description="선택된 URL의 인덱스 목록"),
     final_results_json: str = Form(..., description="검색 결과 JSON 문자열"),
-    keyword_input: str = Form('', description="이전 검색 키워드 입력")
+    keyword_input: str = Form('', description="이전 검색 키워드 입력"),
+    checked_two_keywords: str = Form(""), # 폼 데이터 추가
+    search_mode: str = Form("major"), # 폼 데이터 추가
+    video_only: str = Form(""), # 폼 데이터 추가
 ):
     """
     선택된 뉴스 URL들을 실제 Playwright를 사용하여 naver.me URL로 단축하여 표시합니다.
@@ -378,8 +455,12 @@ async def post_shorten(
             
     logger.info(f"URL 단축 처리 완료. 성공: {len(shortened_list)}건, 실패: {len(shorten_fail_list)}건")
     
+    msg = f"총 {len(final_results)}건의 뉴스가 검색되었습니다."
+    if shortened_list:
+        msg += f" (단축 성공: {len(shortened_list) - len(shorten_fail_list)}건, 실패: {len(shorten_fail_list)}건)"
+
     return templates.TemplateResponse(
-        "index.html", # index.html을 사용하도록 유지
+        "news_search.html", # <-- news_search.html 렌더링
         {
             'request': request,
             'final_results': final_results, # 이전 검색 결과를 그대로 유지하여 다시 표시
@@ -387,6 +468,10 @@ async def post_shorten(
             'shorten_fail': shorten_fail_list, # 실패 목록 전달
             'keyword_input': keyword_input,
             'default_keywords': ', '.join(DEFAULT_KEYWORDS),
+            'msg': msg,
+            'checked_two_keywords': checked_two_keywords == "on",
+            'search_mode': search_mode,
+            'video_only': video_only == "on",
             'error_message': error_message
         }
     )
