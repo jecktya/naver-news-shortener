@@ -41,9 +41,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 5. Playwright 브라우저 설치:
 #    requirements.txt에 playwright가 명시되어 있으므로, 실제 브라우저 바이너리를 설치합니다.
-#    `--with-deps`는 Playwright가 자체적으로 필요한 추가 시스템 의존성을 설치하도록 시도합니다.
+#    `--with-deps` 플래그를 제거하여 Playwright가 시스템 의존성을 자동으로 설치하지 않도록 합니다.
+#    이는 apt-get으로 이미 필요한 의존성을 설치했기 때문입니다.
 #    `chromium`만 설치합니다. 필요에 따라 `firefox`, `webkit`을 추가할 수 있습니다.
-RUN playwright install --with-deps chromium
+RUN playwright install chromium
 
 # 6. 애플리케이션 코드 복사:
 #    현재 디렉토리의 모든 파일(Dockerfile, requirements.txt 제외)을 컨테이너의 /app으로 복사합니다.
