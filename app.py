@@ -7,6 +7,7 @@ import random
 import string
 import logging
 import asyncio # asyncio 임포트 추가 (Playwright 사용을 위해)
+import re # re (정규 표현식) 모듈 임포트. 'NameError' 발생 시 이 줄을 확인하십시오.
 from fastapi import FastAPI, Request, Form, HTTPException, status
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
@@ -37,6 +38,15 @@ DEFAULT_KEYWORDS = [
     '육군', '국방', '외교', '안보', '북한', '신병', '교육대',
     '훈련', '간부', '장교', '부사관', '병사', '용사', '군무원'
 ]
+
+# 주요 언론사 목록 (대소문자 구분 없이 비교하기 위해 set 사용)
+PRESS_MAJOR = {
+    '연합뉴스', '조선일보', '한겨레', '중앙일보',
+    'MBN', 'KBS', 'SBS', 'YTN',
+    '동아일보', '세계일보', '문화일보', '뉴시스',
+    '국민일보', '국방일보', '이데일리',
+    '뉴스1', 'JTBC'
+}
 
 async def search_naver_news(query: str, display: int = 10):
     """
@@ -312,9 +322,10 @@ async def post_search(
             url = item.get("link", "")
             desc = item.get("description", "").replace("<b>", "").replace("</b>", "")
 
-            # 키워드 매칭 및 카운트 (app.py의 parse_newslist 로직 재현)
+            # 키워드 매칭 및 카운트
             kwcnt = {}
             for kw in kw_list:
+                # re 모듈을 사용하여 정규 표현식 컴파일 및 검색
                 pat = re.compile(re.escape(kw), re.IGNORECASE)
                 c = pat.findall(title + " " + desc)
                 if c: kwcnt[kw] = len(c)
@@ -325,8 +336,10 @@ async def post_search(
                 continue
 
             # 주요 언론사 필터링
-            if search_mode == "major" and press and press not in DEFAULT_KEYWORDS: # DEFAULT_KEYWORDS 대신 PRESS_MAJOR 사용
-                if press.lower() not in [p.lower() for p in DEFAULT_KEYWORDS]: # 대소문자 무시 비교
+            # search_mode가 'major'이고, 언론사 이름이 있으며, 해당 언론사가 주요 언론사 목록에 없으면 제외
+            if search_mode == "major" and press: # press가 비어있지 않은 경우에만 검사
+                # 대소문자 구분 없이 비교하기 위해 모두 소문자로 변환
+                if press.lower() not in [p.lower() for p in PRESS_MAJOR]:
                     logger.debug(f"주요 언론사 필터링: '{title}' - {press}. 제외됨.")
                     continue
 
