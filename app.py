@@ -1,37 +1,34 @@
 import os
+import json
 import asyncio
 import re
-import json
 from fastapi import FastAPI, Request, Form
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from playwright.async_api import async_playwright
 
-app = FastAPI()
-templates = Jinja2Templates(directory="templates")
-
+NAVER_NEWS_API_URL = "https://openapi.naver.com/v1/search/news.json"
+NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "YOUR_NAVER_CLIENT_ID_HERE")
+NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "YOUR_NAVER_CLIENT_SECRET_HERE")
 DEFAULT_KEYWORDS = [
     '육군', '국방', '외교', '안보', '북한', '신병', '교육대',
     '훈련', '간부', '장교', '부사관', '병사', '용사', '군무원'
 ]
 
-NAVER_NEWS_API_URL = "https://openapi.naver.com/v1/search/news.json"
-NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "YOUR_NAVER_CLIENT_ID_HERE")
-NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "YOUR_NAVER_CLIENT_SECRET_HERE")
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
+templates.env.globals["enumerate"] = enumerate
 
-def parse_keywords(keywords):
-    # 쉼표 또는 공백 또는 엔터 기준 분리
+# 네이버 뉴스 API 검색 함수 (멀티 키워드 지원)
+async def search_naver_news(keywords: str, display: int = 10):
+    import httpx
+    # 키워드 전처리: 쉼표/공백/엔터 등 모두 분리해서 OR로 연결
     if ',' in keywords:
         kw_list = [k.strip() for k in keywords.split(',') if k.strip()]
     else:
         kw_list = [k.strip() for k in re.split(r'[\s]+', keywords) if k.strip()]
     if not kw_list:
         kw_list = DEFAULT_KEYWORDS
-    return kw_list
-
-async def search_naver_news(keywords: str, display: int = 10):
-    import httpx
-    kw_list = parse_keywords(keywords)
     query = ' OR '.join(kw_list)
     headers = {
         "X-Naver-Client-Id": NAVER_CLIENT_ID,
@@ -48,6 +45,7 @@ async def search_naver_news(keywords: str, display: int = 10):
         data = res.json()
         return data.get("items", [])
 
+# naver.me 변환 (Playwright)
 async def get_naverme_from_news(url: str) -> str:
     async with async_playwright() as p:
         iphone_ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
@@ -56,6 +54,7 @@ async def get_naverme_from_news(url: str) -> str:
         page = await browser.new_page(viewport=iphone_vp, user_agent=iphone_ua)
         await page.goto(url, timeout=20000)
         await asyncio.sleep(2)
+        # 공유버튼 클릭 시도 (실패해도 패스)
         try:
             await page.click("span.u_hc", timeout=3000)
             await asyncio.sleep(1.5)
@@ -69,23 +68,22 @@ async def get_naverme_from_news(url: str) -> str:
         else:
             return "naver.me 주소를 찾을 수 없음"
 
+# 루트: 첫 진입 (검색폼)
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
     return templates.TemplateResponse(
         "index.html", {
             "request": request,
-            "keyword_input": '',
+            "keyword_input": "",
             "results": [],
             "shorten_results": [],
             "error": None,
             "default_keywords": ', '.join(DEFAULT_KEYWORDS)
         })
 
+# 검색
 @app.post("/", response_class=HTMLResponse)
-async def post_search(
-    request: Request,
-    keywords: str = Form(...),
-):
+async def post_search(request: Request, keywords: str = Form(...)):
     try:
         news_items = await search_naver_news(keywords)
         results = []
@@ -119,6 +117,7 @@ async def post_search(
             }
         )
 
+# naver.me 변환
 @app.post("/shorten", response_class=HTMLResponse)
 async def post_shorten(
     request: Request,
