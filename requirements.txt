@@ -38,4 +38,4 @@ itsdangerous
 # langdetect
 
 # python-multipart는 uvicorn[standard]에 포함될 가능성 있음
-# python-multipart 
+python-multipart 
