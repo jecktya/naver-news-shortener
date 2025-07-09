@@ -2,220 +2,63 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>뉴스 검색기 (Naver API)</title>
-    <!-- Tailwind CSS CDN 로드 -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts - Inter 로드 (깔끔한 디자인을 위해) -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <title>네이버 뉴스검색+단축</title>
     <style>
-        /* 기본 폰트 설정 */
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f3f4f6; /* 배경색 */
-            color: #333; /* 기본 글자색 */
-        }
-        /* 컨테이너 최대 너비 설정 */
-        .container {
-            max-width: 960px;
-        }
-        /* 기본 버튼 스타일 (파란색 계열) */
-        .btn-primary {
-            background-color: #4f46e5; /* 인디고 500 */
-            color: white;
-            padding: 0.75rem 1.5rem; /* py-3 px-6 */
-            border-radius: 0.5rem; /* rounded-lg */
-            font-weight: 600; /* font-semibold */
-            transition: background-color 0.2s; /* 호버 효과 */
-        }
-        .btn-primary:hover {
-            background-color: #4338ca; /* 인디고 600 */
-        }
-        /* 보조 버튼 스타일 (회색 계열) */
-        .btn-secondary {
-            background-color: #6b7280; /* 그레이 500 */
-            color: white;
-            padding: 0.75rem 1.5rem;
-            border-radius: 0.5rem;
-            font-weight: 600;
-            transition: background-color 0.2s;
-        }
-        .btn-secondary:hover {
-            background-color: #4b5563; /* 그레이 600 */
-        }
-        /* 뉴스 카드 스타일 */
-        .news-card {
-            background-color: white;
-            border-radius: 0.75rem; /* rounded-xl */
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* shadow-md */
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-            transition: transform 0.2s ease-in-out; /* 부드러운 호버 효과 */
-        }
-        .news-card:hover {
-            transform: translateY(-3px); /* 위로 살짝 올라오는 효과 */
-        }
-        .news-card a {
-            color: #4f46e5; /* 링크 색상 */
-            text-decoration: none;
-            font-weight: 600;
-        }
-        .news-card a:hover {
-            text-decoration: underline; /* 호버 시 밑줄 */
-        }
-        /* 체크박스 컨테이너 스타일 */
-        .checkbox-container {
-            display: flex;
-            align-items: center;
-            margin-bottom: 0.5rem;
-        }
-        .checkbox-container input[type="checkbox"] {
-            margin-right: 0.5rem;
-            width: 1.25rem; /* 20px */
-            height: 1.25rem; /* 20px */
-            border-radius: 0.25rem; /* 4px */
-            border: 1px solid #d1d5db; /* 그레이 300 */
-            appearance: none; /* 기본 브라우저 스타일 제거 */
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            cursor: pointer;
-            position: relative;
-            flex-shrink: 0; /* 체크박스 크기 고정 */
-        }
-        .checkbox-container input[type="checkbox"]:checked {
-            background-color: #4f46e5; /* 인디고 500 */
-            border-color: #4f46e5;
-        }
-        .checkbox-container input[type="checkbox"]:checked::after {
-            content: '✔'; /* 체크 표시 */
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: white;
-            font-size: 0.875rem; /* 14px */
-        }
-        .checkbox-container label {
-            cursor: pointer;
-            font-size: 1rem;
-            color: #374151; /* 그레이 700 */
-        }
+        body { font-family: 'Malgun Gothic', sans-serif; background: #f9f9f9; margin: 30px; }
+        input, button { font-size: 1em; }
+        table { width: 100%; border-collapse: collapse; margin-top: 18px;}
+        th, td { border: 1px solid #ddd; padding: 8px; }
+        th { background: #eee;}
     </style>
 </head>
-<body class="p-4">
-    <div class="container mx-auto bg-white p-6 rounded-lg shadow-xl mt-8">
-        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">뉴스 검색기 (Naver API)</h1>
+<body>
+    <h2>네이버 뉴스검색 + naver.me 단축</h2>
+    <form method="post" action="/">
+        <input type="text" name="keywords" style="width:420px;" value="{{ keyword_input or '' }}" placeholder="{{ default_keywords }}">
+        <button type="submit">검색</button>
+    </form>
+    {% if error %}<div style="color:red;">{{error}}</div>{% endif %}
 
-        <!-- 에러 메시지 표시 영역 -->
-        {% if error_message %}
-        <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
-            <strong class="font-bold">오류:</strong>
-            <span class="block sm:inline">{{ error_message }}</span>
-        </div>
-        {% endif %}
+    {% if results %}
+    <form method="post" action="/shorten">
+        <table>
+            <tr>
+                <th>선택</th><th>제목</th><th>언론사</th><th>원본링크</th>
+            </tr>
+            {% for idx, art in enumerate(results) %}
+            <tr>
+                <td><input type="checkbox" name="selected" value="{{idx}}" checked></td>
+                <td>{{ art.title }}</td>
+                <td>{{ art.press }}</td>
+                <td><a href="{{ art.url }}" target="_blank">보기</a></td>
+            </tr>
+            {% endfor %}
+        </table>
+        <input type="hidden" name="selected_urls" value='[{{ ",".join(loop.index0|string for idx,art in enumerate(results) if True) }}]'>
+        <input type="hidden" name="results_json" value='{{ results|tojson|safe }}'>
+        <input type="hidden" name="keyword_input" value="{{ keyword_input }}">
+        <button type="submit">선택 기사 단축주소 변환</button>
+    </form>
+    {% endif %}
 
-        <!-- 뉴스 검색 폼 -->
-        <form action="/" method="post" class="mb-8 p-6 bg-gray-50 rounded-lg shadow-inner">
-            <div class="mb-4">
-                <label for="keywords" class="block text-gray-700 text-sm font-bold mb-2">
-                    검색 키워드 (콤마로 구분, 예: {{ default_keywords }})
-                </label>
-                <input type="text" id="keywords" name="keywords"
-                       class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-indigo-500"
-                       value="{{ keyword_input }}" placeholder="키워드를 입력하세요">
-            </div>
-            <div class="flex justify-center">
-                <button type="submit" class="btn-primary">뉴스 검색</button>
-            </div>
-        </form>
-
-        <!-- 검색 결과 및 URL 단축 폼 -->
-        {% if final_results is not none %}
-        <h2 class="text-2xl font-bold text-gray-800 mb-4">검색 결과 (총 {{ final_results|length }}건)</h2>
-        
-        {% if final_results|length == 0 %}
-            <p class="text-gray-600 text-center mb-6">검색 결과가 없습니다. 다른 키워드로 시도해 보세요.</p>
-        {% else %}
-            <form action="/shorten" method="post" class="mb-8">
-                <!-- 선택된 뉴스 데이터를 JSON 문자열로 숨겨서 전달 -->
-                <!-- Jinja2에서 Python 객체를 JavaScript 객체로 변환 후, JS에서 JSON.stringify() 사용 -->
-                <input type="hidden" id="finalResultsJsonInput" name="final_results_json">
-                <!-- 이전 검색 키워드도 숨겨서 전달 -->
-                <input type="hidden" name="keyword_input" value="{{ keyword_input }}">
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                    <!-- 각 뉴스 아이템을 반복하여 표시 -->
-                    {% for item in final_results %}
-                    <div class="news-card flex items-start">
-                        <!-- 체크박스 (loop.index0는 0부터 시작하는 현재 반복 인덱스) -->
-                        <div class="checkbox-container mr-4">
-                            <input type="checkbox" id="url_{{ loop.index0 }}" name="selected_urls" value="{{ loop.index0 }}">
-                            <label for="url_{{ loop.index0 }}"></label>
-                        </div>
-                        <!-- 뉴스 내용 -->
-                        <div class="flex-grow">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-1">
-                                <!-- 제목 클릭 시 원본 뉴스로 이동 -->
-                                <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title | safe }}</a>
-                            </h3>
-                            <p class="text-sm text-gray-600 mb-1">{{ item.press }} | {{ item.pubdate }}</p>
-                            <p class="text-sm text-gray-700">{{ item.desc | safe }}</p>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                <!-- URL 단축 버튼 -->
-                <div class="flex justify-center mt-6">
-                    <button type="submit" class="btn-secondary">선택된 뉴스 URL 단축</button>
-                </div>
-            </form>
-        {% endif %}
-        {% endif %}
-
-        <!-- 단축된 URL 표시 영역 -->
-        {% if shortened %}
-        <div class="mt-8 p-6 bg-blue-50 rounded-lg shadow-md">
-            <h2 class="text-2xl font-bold text-blue-800 mb-4">단축된 URL</h2>
-            <!-- 단축된 URL이 표시될 텍스트 영역 (읽기 전용) -->
-            <textarea readonly class="w-full h-48 p-4 border border-blue-300 rounded-lg bg-white text-gray-800 resize-y focus:outline-none focus:ring-2 focus:ring-blue-500">{{ shortened }}</textarea>
-            <!-- 클립보드 복사 버튼 -->
-            <button onclick="copyToClipboard()" class="btn-primary mt-4 w-full">클립보드에 복사</button>
-            <!-- 복사 완료 메시지 -->
-            <p id="copyMessage" class="text-green-600 text-center mt-2 hidden">복사되었습니다!</p>
-        </div>
-        {% endif %}
-    </div>
-
-    <script>
-        // 클립보드 복사 함수
-        function copyToClipboard() {
-            const textarea = document.querySelector('textarea');
-            textarea.select(); // 텍스트 영역의 내용을 선택
-            document.execCommand('copy'); // 선택된 내용을 클립보드에 복사 (navigator.clipboard.writeText() 대신 사용)
-            
-            // 복사 완료 메시지 표시
-            const message = document.getElementById('copyMessage');
-            message.classList.remove('hidden');
-            setTimeout(() => {
-                message.classList.add('hidden'); // 2초 후 메시지 숨김
-            }, 2000);
-        }
-
-        // 페이지 로드 시 final_results 데이터를 JSON 문자열로 변환하여 숨겨진 필드에 설정
-        // final_results는 Jinja2 템플릿 컨텍스트에서 Python 리스트/딕셔너리 형태로 제공됩니다.
-        // 이를 JavaScript 객체로 안전하게 변환한 후, JSON.stringify()를 사용합니다.
-        document.addEventListener('DOMContentLoaded', function() {
-            // final_results가 Jinja2 템플릿 변수로 존재하고, null이 아닐 때만 처리
-            // {% raw %}...{% endraw %} 블록을 사용하여 Jinja2 템플릿 엔진이 이 부분을 파싱하지 않도록 합니다.
-            // 이렇게 하면 JavaScript 코드가 그대로 전달됩니다.
-            {% if final_results is not none %}
-                const finalResultsData = {{ final_results | tojson | safe }};
-                const finalResultsJsonInput = document.getElementById('finalResultsJsonInput');
-                if (finalResultsJsonInput) {
-                    finalResultsJsonInput.value = JSON.stringify(finalResultsData);
-                }
-            {% endif %}
-        });
-    </script>
+    {% if shorten_results %}
+        <h3>단축주소 결과</h3>
+        <table>
+            <tr><th>제목</th><th>언론사</th><th>naver.me</th></tr>
+            {% for r in shorten_results %}
+            <tr>
+                <td>{{ r.title }}</td>
+                <td>{{ r.press }}</td>
+                <td>
+                    {% if r.naverme.startswith("https://naver.me/") %}
+                        <a href="{{ r.naverme }}" target="_blank">{{ r.naverme }}</a>
+                    {% else %}
+                        <span style="color:red">{{ r.naverme }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    {% endif %}
 </body>
 </html>
