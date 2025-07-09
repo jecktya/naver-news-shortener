@@ -2,109 +2,400 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📰 뉴스검색기 (FastAPI+Playwright)</title>
+    <!-- Tailwind CSS CDN 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts - Inter 로드 (깔끔한 디자인을 위해) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Malgun Gothic', sans-serif; background:#fcfcfc; margin:40px;}
-        input[type=text], textarea { font-size:1.1em; padding:4px; border:1px solid #ccc; border-radius:5px;}
-        .msg { color:#4287f5; font-size:1.08em; margin-bottom:10px;}
-        .checkbox { margin-right:5px; }
-        .btn { font-size:1em; padding:3px 10px; border-radius:4px; border:1px solid #bbb; margin:2px 3px; background:#e7e7ef; cursor:pointer;}
-        .btn-selected { background:#4287f5; color:#fff;}
-        .copytxt { width:100%; min-height:120px; font-size:1.05em; margin-top:10px; }
-        .small { font-size:0.95em; color:gray;}
-        .failbox {color:#b00; font-size:0.97em; margin-top:8px;}
-        .keyword-badge {margin-right:4px; padding:2px 6px; background:#eee; border-radius:4px; font-size:0.96em;}
+        /* 기본 폰트 설정 */
+        body {
+            font-family: 'Inter', sans-serif; /* Tailwind 기본 폰트와 일관성 유지 */
+            background-color: #f3f4f6; /* Tailwind gray-100 */
+            color: #333; /* 기본 글자색 */
+            margin: 0; /* 기본 마진 제거 */
+            padding: 1.5rem; /* p-6 */
+        }
+        .container {
+            max-width: 960px; /* 고정 너비 컨테이너 */
+            margin: 2rem auto; /* 상하 마진, 좌우 자동 마진으로 중앙 정렬 */
+            background-color: white;
+            padding: 2.5rem; /* p-10 */
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* shadow-lg */
+        }
+        /* 버튼 기본 스타일 */
+        .btn {
+            font-size: 1em;
+            padding: 0.5rem 1rem; /* py-2 px-4 */
+            border-radius: 0.375rem; /* rounded-md */
+            border: 1px solid #d1d5db; /* gray-300 */
+            margin: 0.25rem 0.5rem; /* my-1 mx-2 */
+            background-color: #e5e7eb; /* gray-200 */
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            display: inline-flex; /* 아이콘과 텍스트 정렬 */
+            align-items: center;
+            justify-content: center;
+        }
+        .btn:hover {
+            background-color: #d1d5db; /* gray-300 */
+            border-color: #9ca3af; /* gray-400 */
+        }
+        /* 선택된 버튼 스타일 */
+        .btn-selected {
+            background-color: #4f46e5; /* indigo-500 */
+            color: white;
+            border-color: #4f46e5;
+        }
+        .btn-selected:hover {
+            background-color: #4338ca; /* indigo-600 */
+            border-color: #4338ca;
+        }
+        /* 텍스트 입력 필드 및 텍스트 영역 */
+        input[type=text], textarea {
+            font-size: 1.05em; /* text-lg */
+            padding: 0.5rem 0.75rem; /* py-2 px-3 */
+            border: 1px solid #d1d5db; /* gray-300 */
+            border-radius: 0.375rem; /* rounded-md */
+            width: 100%; /* w-full */
+            box-sizing: border-box; /* 패딩이 너비에 포함되도록 */
+            margin-top: 0.5rem; /* mt-2 */
+            margin-bottom: 0.75rem; /* mb-3 */
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        input[type=text]:focus, textarea:focus {
+            outline: none;
+            border-color: #6366f1; /* indigo-500 */
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2); /* ring-3 ring-indigo-200 */
+        }
+        /* 메시지 박스 */
+        .msg {
+            color: #4287f5; /* blue-600 */
+            font-size: 1.08em; /* text-lg */
+            margin-bottom: 1rem; /* mb-4 */
+            padding: 0.75rem 1rem; /* py-3 px-4 */
+            background-color: #e0f2fe; /* blue-50 */
+            border-left: 4px solid #3b82f6; /* blue-500 */
+            border-radius: 0.25rem; /* rounded-md */
+        }
+        /* 체크박스 스타일 */
+        .checkbox-label { /* 기존 .checkbox 클래스 대신 사용 */
+            display: inline-flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 1em;
+            color: #374151; /* gray-700 */
+            margin-right: 1.5rem; /* mr-6 */
+        }
+        .checkbox-label input[type="checkbox"],
+        .checkbox-label input[type="radio"] {
+            margin-right: 0.5rem; /* mr-2 */
+            /* 기본 브라우저 스타일 제거 및 커스텀 스타일 적용 */
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            width: 1.25rem; /* w-5 */
+            height: 1.25rem; /* h-5 */
+            border: 1px solid #9ca3af; /* gray-400 */
+            border-radius: 0.25rem; /* rounded-sm */
+            position: relative;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .checkbox-label input[type="checkbox"]:checked {
+            background-color: #4f46e5; /* indigo-500 */
+            border-color: #4f46e5;
+        }
+        .checkbox-label input[type="checkbox"]:checked::after {
+            content: '✔';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 0.875rem; /* text-sm */
+        }
+        .checkbox-label input[type="radio"] {
+            border-radius: 50%; /* 원형 라디오 버튼 */
+        }
+        .checkbox-label input[type="radio"]:checked {
+            background-color: #4f46e5; /* indigo-500 */
+            border-color: #4f46e5;
+        }
+        .checkbox-label input[type="radio"]:checked::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 0.5rem; /* w-2 */
+            height: 0.5rem; /* h-2 */
+            border-radius: 50%;
+            background-color: white;
+        }
+        /* 뉴스 아이템 스타일 */
+        .news-item {
+            background-color: white;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); /* shadow-sm */
+            margin-top: 1rem;
+            display: flex; /* 체크박스와 내용 정렬 */
+            align-items: flex-start;
+        }
+        .news-item .content {
+            flex-grow: 1;
+        }
+        .news-item h3 {
+            font-size: 1.15em; /* text-lg */
+            font-weight: 600; /* font-semibold */
+            margin-bottom: 0.25rem; /* mb-1 */
+        }
+        .news-item h3 a {
+            color: #1a202c; /* gray-900 */
+            text-decoration: none;
+        }
+        .news-item h3 a:hover {
+            text-decoration: underline;
+            color: #4f46e5; /* indigo-500 */
+        }
+        .news-item .small {
+            font-size: 0.9em; /* text-sm */
+            color: #6b7280; /* gray-500 */
+            margin-left: 0.5rem; /* ml-2 */
+        }
+        .news-item .info-text {
+            font-size: 0.95em; /* text-base */
+            color: #4a5568; /* gray-700 */
+            margin-top: 0.25rem; /* mt-1 */
+        }
+        .news-item .keyword-badge {
+            display: inline-block;
+            margin-right: 0.25rem; /* mr-1 */
+            padding: 0.125rem 0.5rem; /* py-0.5 px-2 */
+            background-color: #e0e7ff; /* indigo-100 */
+            color: #4338ca; /* indigo-700 */
+            border-radius: 0.25rem; /* rounded-md */
+            font-size: 0.85em; /* text-sm */
+            font-weight: 500;
+        }
+        .news-item .article-link {
+            display: inline-block;
+            margin-top: 0.5rem; /* mt-2 */
+            color: #4f46e5; /* indigo-500 */
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .news-item .article-link:hover {
+            text-decoration: underline;
+        }
+        /* 복사 영역 */
+        .copytxt {
+            width: 100%;
+            min-height: 120px;
+            font-size: 1.05em;
+            margin-top: 1rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            background-color: #f9fafb; /* gray-50 */
+            resize: vertical; /* 세로 크기 조절 가능 */
+        }
+        /* 실패 메시지 박스 */
+        .failbox {
+            color: #dc2626; /* red-600 */
+            font-size: 0.97em;
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #fee2e2; /* red-100 */
+            border-left: 4px solid #ef4444; /* red-500 */
+            border-radius: 0.25rem;
+        }
+        .failbox b {
+            font-weight: 700; /* font-bold */
+        }
+        /* 복사 완료 메시지 */
+        #copyMessage {
+            color: #16a34a; /* green-600 */
+            font-size: 0.95em;
+            text-align: center;
+            margin-top: 0.5rem;
+        }
+        .hidden {
+            display: none;
+        }
     </style>
     <script>
-    // 전체 선택/해제, 선택 복사 js
-    function selectAll(val) {
-        let cbs = document.querySelectorAll('input[name="selected_urls"]');
-        cbs.forEach(cb => cb.checked = val);
-        updateCopyArea();
-    }
-    function updateCopyArea() {
-        let cbs = document.querySelectorAll('input[name="selected_urls"]:checked');
-        let list = [];
-        cbs.forEach(cb => {
-            let idx = cb.value;
-            let ta = document.getElementById("ta_" + idx);
-            if (ta) list.push(ta.value);
+        // 전체 선택/해제
+        function selectAll(val) {
+            let cbs = document.querySelectorAll('input[name="selected_urls"]');
+            cbs.forEach(cb => cb.checked = val);
+            updateCopyArea();
+        }
+
+        // 복사 영역 업데이트
+        function updateCopyArea() {
+            let cbs = document.querySelectorAll('input[name="selected_urls"]:checked');
+            let list = [];
+            cbs.forEach(cb => {
+                let idx = cb.value;
+                let ta = document.getElementById("ta_" + idx);
+                if (ta) list.push(ta.value);
+            });
+            document.getElementById("copy_area").value = list.join("\n\n");
+        }
+
+        // 텍스트 복사
+        function copyText() {
+            let ta = document.getElementById("copy_area");
+            ta.select();
+            document.execCommand("copy");
+            
+            // 복사 완료 메시지 표시
+            const message = document.getElementById('copyMessage');
+            message.classList.remove('hidden');
+            setTimeout(() => {
+                message.classList.add('hidden');
+            }, 2000);
+        }
+
+        // 페이지 로드 시 초기 복사 영역 업데이트 및 JSON 데이터 설정
+        document.addEventListener('DOMContentLoaded', function() {
+            updateCopyArea(); // 초기 로드 시 선택된 항목으로 복사 영역 업데이트
+
+            // final_results 데이터를 JSON 문자열로 변환하여 숨겨진 필드에 설정
+            // Jinja2 템플릿 변수를 JavaScript 객체로 안전하게 변환 후 JSON.stringify() 사용
+            // {% raw %}...{% endraw %} 블록을 사용하여 Jinja2 템플릿 엔진이 이 부분을 파싱하지 않도록 합니다.
+            // 이렇게 하면 JavaScript 코드가 그대로 전달됩니다.
+            {% if final_results is not none %}
+                const finalResultsData = {{ final_results | tojson | safe }};
+                const finalResultsJsonInput = document.getElementById('finalResultsJsonInput');
+                if (finalResultsJsonInput) {
+                    finalResultsJsonInput.value = JSON.stringify(finalResultsData);
+                }
+            {% endif %}
         });
-        document.getElementById("copy_area").value = list.join("\n\n");
-    }
-    function copyText() {
-        let ta = document.getElementById("copy_area");
-        ta.select(); document.execCommand("copy");
-        alert("복사 완료!");
-    }
     </script>
 </head>
 <body>
-    <h2>📰 뉴스검색기 (FastAPI+Playwright)</h2>
-    <form method="post">
-        <label>키워드 입력 (쉼표로 구분):</label><br>
-        <input type="text" name="keywords" style="width:95%;" value="{{ keyword_input or default_keywords }}" />
-        <span class="small">예: 육군, 국방, 외교, 신병, 교육대 ... (수정/추가/삭제 자유)</span><br>
-        <input type="checkbox" name="checked_two_keywords" value="on" {% if checked_two_keywords %}checked{% endif %}> 2개 이상 키워드 포함만 보기
-        &nbsp;&nbsp;
-        <label>검색 대상:</label>
-        <input type="radio" name="search_mode" value="major" {% if search_mode == "major" %}checked{% endif %}>주요언론사만
-        <input type="radio" name="search_mode" value="all" {% if search_mode == "all" %}checked{% endif %}>전체
-        <input type="checkbox" name="video_only" value="on" {% if video_only %}checked{% endif %}> 동영상만
-        &nbsp;&nbsp;
-        <button type="submit" class="btn">🔍 뉴스 검색</button>
-    </form>
-    {% if msg %}
-    <div class="msg">{{msg}}</div>
-    {% endif %}
-    {% if final_results %}
-    <div>
-        <div style="margin-top:10px;">
-            <button type="button" class="btn" onclick="selectAll(true)">✅ 전체 선택</button>
-            <button type="button" class="btn" onclick="selectAll(false)">❌ 전체 해제</button>
-        </div>
-        <form method="post" action="/shorten">
-            <input type="hidden" name="keywords" value="{{ keyword_input }}">
-            <input type="hidden" name="checked_two_keywords" value="{{'on' if checked_two_keywords else ''}}">
-            <input type="hidden" name="search_mode" value="{{ search_mode }}">
-            <input type="hidden" name="video_only" value="{{'on' if video_only else ''}}">
-            {% for idx, art in enumerate(final_results) %}
-                <div style="margin-top:15px;">
-                    <input type="checkbox" name="selected_urls" value="{{idx}}" class="checkbox" checked onclick="updateCopyArea()">
-                    <span>■ <b>{{art.title}}</b> ({{art.press}})</span>
-                    <span class="small">[{{art.pubdate}}]</span>
-                    <div style="color:gray; margin:2px 0 2px 0; font-size:0.97em;">
-                        키워드: 
-                        {% for kw, cnt in art.keywords %}
-                          <span class="keyword-badge">{{kw}}{% if cnt>1 %}({{cnt}}){% endif %}</span>
-                        {% endfor %}
-                    </div>
-                    <a href="{{art.url}}" target="_blank">[기사보기]</a>
-                    <textarea id="ta_{{idx}}" style="display:none;">■ {{art.title}} ({{art.press}})
-{{art.url}}</textarea>
-                </div>
-            {% endfor %}
-            <textarea id="copy_area" class="copytxt" readonly onclick="this.select()">{% for idx, art in enumerate(final_results) %}
-■ {{art.title}} ({{art.press}})
-{{art.url}}
-
-{% endfor %}</textarea>
-            <button type="button" class="btn" onclick="copyText()">📋 선택 복사</button>
-            <button type="submit" class="btn">🔗 선택 기사 주소 단축변환</button>
+    <div class="container">
+        <h2 class="text-3xl font-bold text-center text-gray-800 mb-6">📰 뉴스검색기 (FastAPI+Playwright)</h2>
+        
+        <!-- 검색 폼 -->
+        <form method="post" class="mb-8 p-6 bg-gray-50 rounded-lg shadow-inner">
+            <div class="mb-4">
+                <label for="keywords" class="block text-gray-700 text-sm font-bold mb-2">키워드 입력 (쉼표로 구분):</label>
+                <input type="text" id="keywords" name="keywords" class="w-full" value="{{ keyword_input or default_keywords }}" />
+                <p class="small text-gray-500 mt-1">예: 육군, 국방, 외교, 신병, 교육대 ... (수정/추가/삭제 자유)</p>
+            </div>
+            
+            <div class="flex flex-wrap items-center gap-4 mb-4">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="checked_two_keywords" value="on" {% if checked_two_keywords %}checked{% endif %}>
+                    2개 이상 키워드 포함만 보기
+                </label>
+                
+                <label class="text-gray-700 font-bold">검색 대상:</label>
+                <label class="checkbox-label">
+                    <input type="radio" name="search_mode" value="major" {% if search_mode == "major" %}checked{% endif %}>
+                    주요언론사만
+                </label>
+                <label class="checkbox-label">
+                    <input type="radio" name="search_mode" value="all" {% if search_mode == "all" %}checked{% endif %}>
+                    전체
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="video_only" value="on" {% if video_only %}checked{% endif %}>
+                    동영상만
+                </label>
+            </div>
+            
+            <div class="flex justify-center mt-6">
+                <button type="submit" class="btn btn-primary">🔍 뉴스 검색</button>
+            </div>
         </form>
+
+        <!-- 메시지 표시 -->
+        {% if msg %}
+        <div class="msg">{{msg}}</div>
+        {% endif %}
+
+        <!-- 검색 결과 -->
+        {% if final_results %}
+        <div class="mt-8">
+            <div class="flex justify-start gap-2 mb-4">
+                <button type="button" class="btn btn-secondary" onclick="selectAll(true)">✅ 전체 선택</button>
+                <button type="button" class="btn btn-secondary" onclick="selectAll(false)">❌ 전체 해제</button>
+            </div>
+            
+            <form method="post" action="/shorten">
+                <!-- 이전 검색 조건들을 숨겨서 전달 -->
+                <input type="hidden" name="keywords" value="{{ keyword_input }}">
+                <input type="hidden" name="checked_two_keywords" value="{{'on' if checked_two_keywords else ''}}">
+                <input type="hidden" name="search_mode" value="{{ search_mode }}">
+                <input type="hidden" name="video_only" value="{{'on' if video_only else ''}}">
+                
+                <!-- final_results 데이터를 JSON 문자열로 변환하여 숨겨서 전달 (JS에서 처리) -->
+                <input type="hidden" id="finalResultsJsonInput" name="final_results_json">
+
+                <!-- 뉴스 목록 -->
+                {% for idx, art in enumerate(final_results) %}
+                    <div class="news-item">
+                        <label class="checkbox-label mr-4">
+                            <input type="checkbox" name="selected_urls" value="{{idx}}" class="checkbox" checked onclick="updateCopyArea()">
+                        </label>
+                        <div class="content">
+                            <h3>
+                                <!-- 제목 클릭 시 원본 기사로 이동 -->
+                                <a href="{{art.url}}" target="_blank" rel="noopener noreferrer">{{art.title | safe}}</a>
+                            </h3>
+                            <p class="text-sm text-gray-600 mb-1">{{art.press}} | {{art.pubdate}}</p>
+                            <div class="info-text">
+                                키워드: 
+                                {% for kw, cnt in art.keywords %}
+                                    <span class="keyword-badge">{{kw}}{% if cnt>1 %}({{cnt}}){% endif %}</span>
+                                {% endfor %}
+                            </div>
+                            <!-- 복사 영역에 들어갈 텍스트를 숨겨진 textarea에 저장 -->
+                            <textarea id="ta_{{idx}}" style="display:none;">■ {{art.title | safe}} ({{art.press}})
+{{art.url}}</textarea>
+                        </div>
+                    </div>
+                {% endfor %}
+
+                <!-- 전체 복사 영역 -->
+                <textarea id="copy_area" class="copytxt" readonly onclick="this.select()"></textarea>
+                <p id="copyMessage" class="text-green-600 text-center mt-2 hidden">복사되었습니다!</p>
+
+                <div class="flex justify-center mt-4">
+                    <button type="button" class="btn btn-primary" onclick="copyText()">📋 선택 복사</button>
+                    <button type="submit" class="btn btn-primary">🔗 선택 기사 주소 단축변환</button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+
+        <!-- 단축된 URL 표시 -->
+        {% if shortened %}
+        <div class="mt-8 p-6 bg-blue-50 rounded-lg shadow-md">
+            <h2 class="text-2xl font-bold text-blue-800 mb-4">단축 주소 변환 완료!</h2>
+            <textarea class="copytxt" readonly onclick="this.select()">{{shortened}}</textarea>
+            <button onclick="copyText()" class="btn btn-primary mt-4 w-full">클립보드에 복사</button>
+            <p id="copyMessage" class="text-green-600 text-center mt-2 hidden">복사되었습니다!</p>
+        </div>
+        {% endif %}
+
+        <!-- 단축 변환 실패 목록 -->
+        {% if shorten_fail %}
+        <div class="failbox mt-8">
+            <b>단축주소 변환 실패 목록:</b><br>
+            {% for f in shorten_fail %}
+                {{f}}<br>
+            {% endfor %}
+        </div>
+        {% endif %}
     </div>
-    {% endif %}
-    {% if shortened %}
-    <div style="margin:15px 0 5px 0; color:green;">단축주소 변환 완료!</div>
-    <textarea class="copytxt" readonly onclick="this.select()">{{shortened}}</textarea>
-    {% endif %}
-    {% if shorten_fail %}
-    <div class="failbox">
-      <b>단축주소 변환 실패 목록:</b><br>
-      {% for f in shorten_fail %}
-        {{f}}<br>
-      {% endfor %}
-    </div>
-    {% endif %}
 </body>
 </html>
