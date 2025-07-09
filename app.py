@@ -12,6 +12,8 @@ from fastapi import FastAPI, Request, Form, HTTPException, status
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 import httpx
+from datetime import datetime, timedelta # datetime, timedelta 임포트 추가
+from typing import List, Dict, Optional # Optional 임포트 추가
 
 # 로거 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -51,6 +53,28 @@ PRESS_MAJOR = {
     '국민일보', '국방일보', '이데일리',
     '뉴스1', 'JTBC'
 }
+
+def parse_api_pubdate(pubdate_str: str) -> Optional[datetime]:
+    """
+    RFC 1123 형식의 날짜 문자열을 datetime 객체로 파싱합니다.
+    예: "Wed, 09 Jul 2025 12:55:29 +0900"
+    """
+    if not pubdate_str:
+        return None
+    try:
+        # RFC 1123 형식 파싱 (요일, 일, 월, 년, 시:분:초, 타임존)
+        # 타임존 정보는 strptime에서 직접 처리하기 어려우므로, 제거 후 파싱
+        # 예: "Wed, 09 Jul 2025 12:55:29 +0900" -> "Wed, 09 Jul 2025 12:55:29"
+        # 마지막 6자리는 타임존 정보 (+0900)이므로, 이를 제외하고 파싱
+        date_time_part = pubdate_str[:-6].strip()
+        # %a: 요일 약어, %d: 일, %b: 월 약어, %Y: 년도, %H: 시, %M: 분, %S: 초
+        return datetime.strptime(date_time_part, "%a, %d %b %Y %H:%M:%S")
+    except ValueError as e:
+        logger.error(f"pubDate 파싱 실패 ('{pubdate_str}'): {e}", exc_info=True)
+        return None
+    except Exception as e:
+        logger.error(f"pubDate 파싱 중 예상치 못한 오류: {e}", exc_info=True)
+        return None
 
 async def search_naver_news(query: str, display: int = 10):
     """
@@ -162,6 +186,7 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
             await asyncio.sleep(random.uniform(2.5, 4.5)) # 페이지 로드 후 충분히 대기
 
             # --- 공유 버튼 찾기 및 클릭 ---
+            logger.info("공유 버튼 찾기 시도 시작.") # 추가된 로깅
             # 네이버 모바일 웹의 공유 버튼은 '.u_hc' 또는 'sns 보내기' 텍스트를 가진 span 태그이거나,
             # 툴바에 있는 공유 아이콘일 수 있습니다. 여러 선택자를 시도합니다.
             share_button_selectors = [
@@ -190,17 +215,21 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
                         logger.debug(f"선택자 '{selector}'의 요소가 보이지 않습니다.")
                 except Exception as e:
                     logger.debug(f"공유 버튼 선택자 '{selector}' 대기 또는 클릭 실패: {e}")
+                    # 디버깅을 위해 실패 시 스크린샷 저장 (로컬에서만 사용 권장)
+                    # await page.screenshot(path=f"share_button_fail_{selector.replace(' ', '_').replace(':', '_').replace('#', '')}.png")
                     continue
             
             if not share_button_found:
                 logger.warning("모든 공유 버튼 선택자 시도 실패. 공유 버튼을 찾을 수 없습니다.")
                 # 디버깅을 위해 스크린샷 저장 (로컬에서만 사용 권장)
-                # await page.screenshot(path="share_button_not_found.png") 
+                # await page.screenshot(path="share_button_not_found_final.png") 
                 return orig_url, "공유 버튼을 찾을 수 없음"
             
+            logger.info("공유 팝업 대기 중...") # 추가된 로깅
             await asyncio.sleep(random.uniform(1.5, 3.0)) # 공유 팝업이 뜨는 것을 대기
 
             # --- 단축 URL 요소 찾기 ---
+            logger.info("단축 URL 요소 찾기 시도 시작.") # 추가된 로깅
             # 공유 팝업 내에서 naver.me 단축 URL을 포함하는 요소를 찾습니다.
             link_elem_selectors = [
                 "button[data-url^='https://naver.me/']",     # data-url 속성으로 naver.me 주소 바로 찾기 (버튼)
@@ -239,6 +268,8 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
                         logger.debug(f"선택자 '{selector}'의 단축 URL 요소가 보이지 않습니다.")
                 except Exception as e:
                     logger.debug(f"단축 URL 요소 선택자 '{selector}' 대기 실패: {e}")
+                    # 디버깅을 위해 실패 시 스크린샷 저장 (로컬에서만 사용 권장)
+                    # await page.screenshot(path=f"short_url_fail_{selector.replace(' ', '_').replace(':', '_').replace('#', '')}.png")
                     continue
 
             if short_link:
@@ -246,7 +277,7 @@ async def naver_me_shorten(orig_url: str) -> tuple[str, str]:
             else:
                 logger.warning("모든 단축 URL 요소 선택자 시도 실패. naver.me 주소를 찾을 수 없습니다.")
                 # 디버깅을 위해 스크린샷 저장 (로컬에서만 사용 권장)
-                # await page.screenshot(path="short_url_not_found.png") 
+                # await page.screenshot(path="short_url_not_found_final.png") 
                 return orig_url, "naver.me 주소를 찾을 수 없음 (최종)"
 
     except Exception as e:
@@ -325,6 +356,7 @@ async def post_search(
             press = item.get("publisher", "")
             url = item.get("link", "")
             desc = item.get("description", "").replace("<b>", "").replace("</b>", "")
+            pubdate_str = item.get("pubDate", "") # API에서 받은 pubDate 문자열
 
             # 키워드 매칭 및 카운트
             kwcnt = {}
@@ -349,20 +381,19 @@ async def post_search(
 
             # 동영상만 필터링 (네이버 API 응답에는 직접적인 동영상 여부 필드가 없을 수 있으므로, URL로 추정)
             if video_only == "on":
-                # 네이버 API 응답에서 동영상 URL 패턴을 직접 확인하기 어려움.
-                # 이 필터는 Playwright 기반의 웹 스크래핑 방식에서 더 유효함.
-                # API에서는 'media' 필드 등을 확인해야 할 수 있으나, 현재 API 응답 구조에는 없음.
-                # 따라서, 이 필터는 현재 API 기반 검색에서는 제한적으로 작동하거나, 추가 로직 필요.
-                # 여기서는 일단 무시하거나, URL에 'tv.naver.com' 등이 포함된 경우로 간주할 수 있음.
-                # 현재 네이버 API 뉴스 검색 결과에는 동영상 필터링을 위한 명확한 필드가 없으므로,
+                # 현재 API 검색에서는 동영상 필터링을 위한 명확한 필드가 없으므로,
                 # 이 부분은 Playwright 기반의 웹 스크래핑에서 더 유용합니다.
                 # API를 통한 동영상 필터링은 네이버 API 문서 확인 후 추가 구현이 필요합니다.
-                pass # API 검색에서는 이 필터링을 적용하기 어려움.
+                pass 
 
+            # pubDate 문자열을 datetime 객체로 파싱
+            parsed_pubdate = parse_api_pubdate(pubdate_str)
+            
             processed_results.append({
                 "title": title,
                 "press": press,
-                "pubdate": item.get("pubDate", ""), # API는 'pubDate' 필드 사용
+                "pubdate": parsed_pubdate, # datetime 객체로 저장
+                "pubdate_display": parsed_pubdate.strftime('%Y-%m-%d %H:%M') if parsed_pubdate else pubdate_str, # 표시용 문자열
                 "url": url,
                 "desc": desc,
                 "keywords": sorted(kwcnt.items(), key=lambda x:(-x[1], x[0])),
@@ -370,7 +401,9 @@ async def post_search(
             })
         
         # 최종 정렬 (키워드 빈도수 내림차순, 발행일 오름차순)
-        processed_results.sort(key=lambda x: (-x['kw_count'], x['pubdate']), reverse=False)
+        # pubdate가 None인 경우를 대비하여 None 값을 가장 작은 값으로 처리하거나, 정렬 키에서 제외
+        # 여기서는 None 값을 가진 항목이 정렬 순서에서 뒤로 가도록 처리 (None 비교는 파이썬 3에서 가능)
+        processed_results.sort(key=lambda x: (-x['kw_count'], x['pubdate'] if x['pubdate'] is not None else datetime.min), reverse=False)
         final_results = processed_results
         
         msg = f"총 {len(final_results)}건의 뉴스가 검색되었습니다."
