@@ -2,64 +2,65 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>📰 네이버 뉴스검색 + naver.me 단축</title>
+    <title>📰 네이버 뉴스검색기 + 단축주소</title>
     <style>
-        body { font-family: 'Malgun Gothic', sans-serif; background: #f9f9f9; margin: 40px; }
-        table { border-collapse: collapse; width: 100%; margin-top: 16px; }
-        th, td { border: 1px solid #ddd; padding: 7px; }
-        th { background: #f2f2f2; }
-        input[type="text"] { width: 400px; }
-        textarea { width: 100%; min-height: 90px; }
-        .error { color: red; }
+        body { font-family:'Malgun Gothic',sans-serif; background:#f9f9f9; margin:40px; }
+        table { width:100%; border-collapse:collapse; margin-top:10px; }
+        th, td { border:1px solid #ddd; padding:8px; text-align:left; }
+        th { background:#f2f2f2; }
+        textarea { width:100%; height:120px; font-size:1em; padding:8px; border:1px solid #ccc; border-radius:4px; }
+        button { padding:7px 13px; margin-left:8px; background:#4287f5; color:#fff; border:none; border-radius:4px; cursor:pointer; }
+        button:hover { opacity:0.9; }
     </style>
 </head>
 <body>
-    <h2>📰 네이버 뉴스검색 + naver.me 단축</h2>
+    <h1>📰 네이버 뉴스검색기 + 단축주소</h1>
     <form method="post" action="/">
-        <input type="text" name="keywords" value="{{ keyword_input or '' }}" placeholder="{{ default_keywords }}">
-        <button type="submit">🔍 검색</button>
+        <label>🔍 키워드 (쉼표·스페이스 가능):</label>
+        <input type="text" name="keywords" style="width:380px;" value="{{ keyword_input or '' }}" placeholder="{{ default_keywords }}">
+        <button type="submit">검색</button>
     </form>
-
-    {% if error %}
-    <div class="error">{{ error }}</div>
-    {% endif %}
-
-    {% if results %}
-    <hr>
-    <form method="post" action="/shorten" id="shorten-form">
+    {% if msg %}<div style="margin:20px 0;color:#777;">{{ msg }}</div>{% endif %}
+    {% if final_results %}
+    <form method="post" action="/shorten">
         <table>
             <tr>
                 <th>선택</th>
                 <th>제목</th>
                 <th>언론사</th>
-                <th>날짜</th>
-                <th>URL</th>
+                <th>발행일</th>
+                <th>원본</th>
             </tr>
-            {% for idx, art in enumerate(results) %}
+            {% for idx, art in enumerate(final_results) %}
             <tr>
                 <td><input type="checkbox" name="selected_urls" value="{{ idx }}" checked></td>
                 <td>{{ art.title }}</td>
                 <td>{{ art.press }}</td>
-                <td>{{ art.pubdate }}</td>
-                <td><a href="{{ art.url }}" target="_blank">바로가기</a></td>
+                <td>{{ art.pubdate_display or art.pubdate }}</td>
+                <td><a href="{{ art.url }}" target="_blank">원본</a></td>
             </tr>
             {% endfor %}
         </table>
-        <input type="hidden" name="results_json" value='{{ results | tojson | safe }}'>
+        <input type="hidden" name="final_results_json" value='{{ final_results|tojson|safe }}'>
         <input type="hidden" name="keyword_input" value="{{ keyword_input }}">
-        <button type="submit">🔗 선택 기사 naver.me 변환</button>
+        <button type="submit">🔗 선택 기사 주소 단축변환</button>
     </form>
     {% endif %}
-
-    {% if shorten_results %}
-    <hr>
-    <h3>🔗 단축주소 결과</h3>
-    <textarea readonly>
-{% for s in shorten_results %}
-■ {{ s.title }} ({{ s.press }}) 
-{{ s.naverme }}
-{% endfor %}
-    </textarea>
+    {% if shortened %}
+    <h2>🔗 단축 주소 결과</h2>
+    <textarea readonly>{{ shortened }}</textarea>
+    {% endif %}
+    {% if shorten_fail %}
+    <h3 style="color:red;">단축주소 변환 실패 목록:</h3>
+    <ul>
+    {% for msg in shorten_fail %}
+        <li>{{ msg }}</li>
+    {% endfor %}
+    </ul>
+    {% endif %}
+    {% if error_message %}
+    <h3 style="color:red;">에러:</h3>
+    <div>{{ error_message }}</div>
     {% endif %}
 </body>
 </html>
