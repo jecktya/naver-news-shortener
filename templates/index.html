@@ -3,62 +3,113 @@
 <head>
     <meta charset="UTF-8">
     <title>📰 네이버 뉴스검색기 + 단축주소</title>
+    <style>
+        body { font-family:'Malgun Gothic',sans-serif; background:#f9f9f9; margin:40px; }
+        form { margin-bottom:20px; }
+        label, select, input[type=text], button { font-size:1em; }
+        select, input[type=text] { padding:6px; border:1px solid #ccc; border-radius:4px; }
+        button { padding:6px 12px; margin-left:8px; background:#4287f5; color:#fff; border:none; border-radius:4px; cursor:pointer; }
+        button:hover { opacity:0.9; }
+        table { width:100%; border-collapse:collapse; margin-top:10px; }
+        th, td { border:1px solid #ddd; padding:8px; text-align:left; }
+        th { background:#f2f2f2; }
+        textarea { width:100%; height:120px; font-size:1em; padding:8px; border:1px solid #ccc; border-radius:4px; }
+        hr { margin:24px 0; border:none; border-top:1px solid #eee; }
+        .keyword-badge { background: #e3eefd; color: #2e5599; font-size: 0.96em; padding: 1px 7px; border-radius: 10px; margin-right:3px;}
+        .short-url { color: #15803d; font-weight:bold; }
+        .fail-url { color: #e11d48; }
+    </style>
 </head>
 <body>
-    <h1>📰 네이버 뉴스검색 + naver.me</h1>
+    <h1>📰 네이버 뉴스검색기 + 단축주소</h1>
+    <div style="color:gray;">🕒 현재 시각: {{ now }}</div>
     <form method="post" action="/">
-        <label>검색 유형:</label>
+        <label>🗂️ 검색 유형:</label>
         <select name="search_mode">
             <option value="all" {% if search_mode == 'all' %}selected{% endif %}>전체</option>
             <option value="major" {% if search_mode == 'major' %}selected{% endif %}>주요언론사만</option>
         </select>
-        <br>
-        <label>🔍 키워드 (쉼표, 공백 구분):</label>
+        <label style="margin-left:20px;">
+            <input type="checkbox" name="video_only" value="on" {% if video_only %}checked{% endif %}> 동영상만
+        </label>
+        <br><br>
+        <label>🔍 키워드 (쉼표/스페이스 가능, 2개 이상 포함 기사만 표시):</label><br>
         <input type="text" name="keywords" style="width:400px;" value="{{ keyword_input or '' }}" placeholder="{{ default_keywords }}">
-        <button type="submit">검색</button>
+        <button type="submit">🔍 뉴스 검색</button>
     </form>
-    <p>현재 시각: {{ current_time }}</p>
 
     {% if results %}
     <hr>
+    <h2>🔎 검색 결과 (2개 이상 키워드 포함, 최대 30건)</h2>
     <form method="post" action="/shorten">
-        <table border="1">
+        <table>
             <tr>
-                <th>선택</th><th>제목</th><th>언론사</th><th>발행시간</th><th>원본</th>
+                <th>선택</th>
+                <th>제목/요약</th>
+                <th>언론사</th>
+                <th>시간</th>
+                <th>키워드</th>
+                <th>URL</th>
             </tr>
             {% for idx, art in enumerate(results) %}
             <tr>
-                <td><input type="checkbox" name="selected_urls" value="{{ idx }}" checked></td>
-                <td>{{ art.title }}</td>
+                <td>
+                    <input type="checkbox" name="selected_urls" value="{{ idx }}" checked>
+                </td>
+                <td>
+                    <b>{{ art.title }}</b>
+                    <div style="color:gray;font-size:0.98em;">{{ art.desc }}</div>
+                </td>
                 <td>{{ art.press }}</td>
                 <td>{{ art.pubdate }}</td>
-                <td><a href="{{ art.url }}" target="_blank">바로가기</a></td>
+                <td>
+                    {% for kw, cnt in art.keywords %}
+                        <span class="keyword-badge">{{ kw }}{% if cnt>1 %}({{cnt}}){% endif %}</span>
+                    {% endfor %}
+                </td>
+                <td><a href="{{ art.url }}" target="_blank">원본</a></td>
             </tr>
             {% endfor %}
         </table>
         <input type="hidden" name="results_json" value='{{ results|tojson|safe }}'>
         <input type="hidden" name="keyword_input" value="{{ keyword_input }}">
         <input type="hidden" name="search_mode" value="{{ search_mode }}">
-        <button type="submit">선택 기사 naver.me 단축주소 변환</button>
+        <input type="hidden" name="video_only" value="{{ video_only }}">
+        <button type="submit" style="margin-top:15px;">🔗 선택 기사 단축주소 변환</button>
     </form>
     {% endif %}
 
     {% if shorten_results %}
     <hr>
-    <h2>단축주소 결과</h2>
-    <ul>
-    {% for item in shorten_results %}
-        <li>
-            <strong>{{ item.title }} ({{ item.press }})</strong><br>
-            <code>{{ item.naverme }}</code>
-        </li>
-    {% endfor %}
-    </ul>
+    <h2>🔗 단축주소 결과</h2>
+    <table>
+        <tr><th>제목</th><th>언론사</th><th>단축주소</th></tr>
+        {% for item in shorten_results %}
+        <tr>
+            <td>{{ item.title }}</td>
+            <td>{{ item.press }}</td>
+            <td>
+                {% if item.naverme.startswith("http") %}
+                    <span class="short-url">{{ item.naverme }}</span>
+                {% else %}
+                    <span class="fail-url">{{ item.naverme }}</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    <textarea readonly>{% for item in shorten_results %}
+[{{ item.press }}] {{ item.title }}
+{{ item.naverme }}
+{% endfor %}</textarea>
     {% endif %}
 
     {% if error %}
     <hr>
-    <div style="color:red">{{ error }}</div>
+    <h3 style="color:red;">에러:</h3>
+    <div>{{ error }}</div>
     {% endif %}
+
+    <p style="margin-top:35px;"><a href="/">🏠 홈으로 돌아가기</a></p>
 </body>
 </html>
