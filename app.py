@@ -214,24 +214,3 @@ async def post_search(
                 "msg": f"오류: {e}"
             }
         )
-```
----
-
-### 변경 사항 및 제안
-
-1.  **`email.utils.parsedate_to_datetime` 임포트 추가**: `parse_pubdate` 함수에서 사용되는 `parsedate_to_datetime`이 임포트되어 있지 않아 발생하는 `NameError`를 수정했습니다.
-2.  **`search_news_naver` 함수에 재시도 로직 추가**:
-    * `max_retries=3` (최대 3번 재시도) 파라미터를 추가했습니다.
-    * `httpx.HTTPStatusError` 중 `status_code == 429`일 경우, `asyncio.sleep(2 ** attempt)`를 사용하여 지수적으로 대기 시간을 늘린 후 재시도합니다. (1초, 2초, 4초 대기)
-    * 다른 종류의 `httpx.HTTPStatusError`나 `httpx.RequestError`는 즉시 예외를 발생시킵니다.
-3.  **로깅 개선**: `logger.info`와 `logger.warning`, `logger.error`를 사용하여 API 호출 시도, 429 에러 발생, 최종 실패 등의 상황을 더 명확하게 로그로 남기도록 했습니다.
-
-### 추가 제안
-
-* **네이버 API 사용량 확인**: 네이버 개발자 센터에서 발급받은 API 키의 일일/시간당 호출 제한을 정확히 확인해 보세요. 앱의 사용 패턴이 이 제한을 초과하는지 검토하는 것이 중요합니다.
-* **`display` 값 조정**: `search_news_naver` 함수에서 `display` 파라미터의 기본값이 `30`으로 되어 있습니다. 만약 키워드 수가 많고 동시 요청이 잦다면, 이 값을 `10`이나 `5` 등으로 줄여서 한 번의 API 호출로 가져오는 뉴스 기사 수를 줄이는 것을 고려해 볼 수 있습니다. 이는 네이버 API에 가해지는 부하를 직접적으로 줄여줍니다.
-    * `tasks = [search_news_naver(kw, display=10) for kw in keyword_list]` 와 같이 변경하여 테스트해 보세요.
-* **Render.com 로그 분석**: Render 대시보드에서 앱의 로그를 다시 확인해 보세요. `429` 에러가 `httpx` 호출에서 발생하는지 (즉, 네이버 API가 반환하는지), 아니면 Render 자체의 로드 밸런서가 앱으로의 요청을 막는 것인지 명확히 파악하는 것이 중요합니다. 현재 코드와 에러 메시지를 보면 네이버 API 쪽에서 오는 `429`일 가능성이 높습니다.
-* **캐싱 도입**: 만약 검색 결과가 자주 변하지 않는다면, FastAPI 앱 자체에 캐싱 레이어를 도입하여 동일한 검색 요청에 대해 네이버 API를 다시 호출하지 않고 캐시된 결과를 반환하도록 할 수 있습니다. 이는 API 호출 횟수를 획기적으로 줄여줄 수 있습니다. (예: `FastAPI-Cache` 라이브러리 사용)
-
-이러한 변경 사항과 제안을 통해 Render.com 환경에서 `429` 에러가 줄어들기를 바랍
