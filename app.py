@@ -5,15 +5,16 @@ import re
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from email.utils import parsedate_to_datetime
+from email.utils import parsedate_to_datetime # email.utils.parsedate_to_datetime 임포트 추가
 
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, status
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 import httpx
 
+# --- 로깅 설정 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) # 특정 로거 사용
 
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "YOUR_NAVER_CLIENT_ID_HERE")
 NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "YOUR_NAVER_CLIENT_SECRET_HERE")
@@ -22,23 +23,28 @@ NAVER_NEWS_API_URL = "https://openapi.naver.com/v1/search/news.json"
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
+# 주요 언론사 매핑
 PRESS_MAJOR = {
     "조선일보", "연합뉴스", "한겨레", "중앙일보", "MBN", "KBS", "SBS", "YTN", "동아일보",
     "세계일보", "문화일보", "뉴시스", "네이버", "다음", "국민일보", "국방일보", "이데일리",
     "뉴스1", "JTBC"
 }
+
 DEFAULT_KEYWORDS = [
     "육군", "국방", "외교", "안보", "북한", "신병", "교육대", "훈련", "간부",
     "장교", "부사관", "병사", "용사", "군무원"
 ]
 
 def extract_press(item):
+    # 네이버 뉴스 API는 publisher 필드에 언론사명이 들어있음
     return item.get("publisher") or ""
 
 def parse_pubdate(pubdate_str):
+    # 예: "Wed, 09 Jul 2025 12:55:29 +0900"
     try:
         dt = parsedate_to_datetime(pubdate_str)
         if dt.tzinfo is None:
+            # 타임존 정보가 없으면 KST (한국 표준시)로 가정
             dt = dt.replace(tzinfo=timezone(timedelta(hours=9)))
         return dt
     except Exception as e:
@@ -48,7 +54,11 @@ def parse_pubdate(pubdate_str):
 def clean_html_tags(text):
     return re.sub(r'<[^>]+>', '', text or "")
 
-async def search_news_naver(keyword, display=15, max_retries=3):
+async def search_news_naver(keyword, display=10, max_retries=3): # display 기본값 10으로 유지
+    """
+    네이버 뉴스 API를 호출하여 뉴스 아이템을 가져옵니다.
+    429 Too Many Requests 에러 발생 시 재시도 로직을 포함합니다.
+    """
     headers = {
         "X-Naver-Client-Id": NAVER_CLIENT_ID,
         "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
@@ -58,28 +68,35 @@ async def search_news_naver(keyword, display=15, max_retries=3):
         "display": display,
         "sort": "date"
     }
+
     for attempt in range(max_retries):
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                logger.info(f"[API] HTTP Request: GET {NAVER_NEWS_API_URL}?query={keyword}")
+                logger.info(f"[API 호출] 시도 {attempt + 1}/{max_retries} | 쿼리: '{keyword}'")
                 res = await client.get(NAVER_NEWS_API_URL, headers=headers, params=params)
-                res.raise_for_status()
+                res.raise_for_status() # 200 OK가 아니면 예외 발생 (429 포함)
                 return res.json().get("items", [])
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                logger.warning(f"[API] 429 Too Many Requests. {max_retries-attempt-1} tries left")
-                await asyncio.sleep(2 ** attempt)
+                # 429 에러 발생 시 경고 로깅 및 지수 백오프 대기
+                logger.warning(f"[API 오류] 429 Too Many Requests. 재시도 중... (남은 시도: {max_retries - 1 - attempt})")
+                await asyncio.sleep(2 ** attempt) # 1, 2, 4초 대기
             else:
-                logger.error(f"[API] HTTP Status Error: {e.response.status_code} - {e.response.text}", exc_info=True)
-                raise
+                # 다른 HTTP 오류는 즉시 예외 발생
+                logger.error(f"[API 오류] HTTP Status Error: {e.response.status_code} - {e.response.text}", exc_info=True)
+                raise # 다른 HTTP 오류는 즉시 발생
         except httpx.RequestError as e:
-            logger.error(f"[API] Request Error: {e}", exc_info=True)
-            raise
+            # 네트워크 요청 오류 (DNS 문제, 연결 끊김 등)
+            logger.error(f"[API 오류] Request Error: {e}", exc_info=True)
+            raise # 요청 오류는 즉시 발생
         except Exception as e:
-            logger.error(f"[API] Unexpected error: {e}", exc_info=True)
-            raise
-    logger.error(f"[API] '{keyword}' 검색, 최대 재시도 초과.")
-    return []
+            # 그 외 예상치 못한 오류
+            logger.error(f"[API 오류] 예상치 못한 오류: {e}", exc_info=True)
+            raise # 다른 예외는 즉시 발생
+    
+    # 모든 재시도 실패 시
+    logger.error(f"[API 오류] '{keyword}' 검색, 최대 재시도 횟수 ({max_retries}) 초과. 429 에러 지속.")
+    return [] # 모든 재시도 실패 시 빈 리스트 반환
 
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
@@ -91,6 +108,7 @@ async def get_index(request: Request):
             "keyword_input": ', '.join(DEFAULT_KEYWORDS),
             "final_articles": [],
             "search_mode": "전체",
+            # "video_only": False, # HTML에 없으므로 제거
             "now": now.strftime('%Y-%m-%d %H:%M:%S'),
             "msg": None
         }
@@ -101,22 +119,31 @@ async def post_search(
     request: Request,
     keywords: str = Form(""),
     search_mode: str = Form("전체"),
+    # video_only: str = Form(""), # HTML에 없으므로 제거
 ):
     now = datetime.now(timezone(timedelta(hours=9)))
+    # 키워드 전처리
     keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
     if not keyword_list:
         keyword_list = DEFAULT_KEYWORDS
-    logger.info(f"[검색] POST | 키워드={keywords} | 검색모드={search_mode}")
+
+    logger.info(f"[검색] POST | 키워드={keywords} | 검색모드={search_mode}") # video_only 로그 제거
+
     url_map = dict()
     try:
-        semaphore = asyncio.Semaphore(5)
+        # --- API 호출 동시성 제어 (Semaphore 사용) ---
+        # 한 번에 5개까지만 동시 요청을 보내도록 제한합니다.
+        semaphore = asyncio.Semaphore(5) 
+
         async def limited_search(kw):
             async with semaphore:
-                return await search_news_naver(kw, display=15)
+                # 각 키워드당 가져오는 기사 수를 10으로 설정합니다.
+                return await search_news_naver(kw, display=10) 
+
         tasks = [limited_search(kw) for kw in keyword_list]
         result_lists = await asyncio.gather(*tasks)
 
-        # 기사 합치기 & 키워드 매칭(제목/내용 포함) & 중복제거
+        # 기사 합치기 & 중복 제거 & 키워드 매칭
         for idx, items in enumerate(result_lists):
             kw = keyword_list[idx]
             for a in items:
@@ -132,38 +159,55 @@ async def post_search(
                         "desc": desc,
                         "url": url,
                         "press": press,
-                        "pubdate": pub,
+                        "pubdate": pub, # datetime 객체 유지
                         "matched": set(),
                     }
+                # 제목/내용에 키워드가 포함되어 있으면 추가
                 haystack = f"{title} {desc}"
                 if kw in haystack:
                     url_map[url]["matched"].add(kw)
         articles = []
         for v in url_map.values():
-            # 4시간 이내만
+            # 시간 필터: 4시간 이내만
             if not v["pubdate"] or (now - v["pubdate"] > timedelta(hours=4)):
                 continue
-            # 키워드 전부 포함된 기사만 (예: 키워드 2개면 모두 포함)
-            if not all(k in v["matched"] for k in keyword_list):
+            # 2개 이상 키워드 포함 필터 (기존 로직 유지)
+            if len(v["matched"]) < 2:
                 continue
             # 주요언론사 필터
             if search_mode == "주요언론사만" and v["press"] not in PRESS_MAJOR:
                 continue
-            # matched(set) → list로 변환
-            v["matched"] = list(v["matched"])
-            # pubdate(datetime) → 문자열로 변환 (JSON 직렬화 에러 방지)
-            v["pubdate"] = v["pubdate"].strftime('%Y-%m-%d %H:%M') if v["pubdate"] else ""
+            # video_only 필터링 로직 제거 (HTML에 없으므로)
+            # if search_mode == "동영상만":
+            #     video_keys = ["영상", "동영상", "영상보기", "보러가기", "뉴스영상", "영상뉴스", "클릭하세요", "바로보기"]
+            #     if v["press"] not in PRESS_MAJOR:
+            #         continue
+            #     if not (any(k in v["desc"] for k in video_keys) or any(k in v["title"] for k in video_keys)):
+            #         continue
             articles.append(v)
+
+        # 정렬: 시간순 (datetime 객체로 정렬)
         sorted_articles = sorted(articles, key=lambda x: x['pubdate'], reverse=True)
-        msg = f"검색 결과: {len(sorted_articles)}건 (4시간 이내, 키워드 전체 포함)"
-        logger.info(f"[검색] 최종 기사수: {len(sorted_articles)}")
+        
+        # 템플릿에 전달하기 위한 최종 기사 목록 (pubdate를 문자열로, matched를 리스트로 변환)
+        final_articles_for_template = []
+        for art in sorted_articles:
+            art_copy = art.copy()
+            art_copy["pubdate"] = art_copy["pubdate"].strftime('%Y-%m-%d %H:%M') if art_copy["pubdate"] else ""
+            art_copy["matched"] = sorted(list(art_copy["matched"]), key=lambda x: x) # set을 list로 변환
+            final_articles_for_template.append(art_copy)
+
+
+        msg = f"검색 결과: {len(final_articles_for_template)}건 (4시간 이내, 2개 이상 키워드 포함)"
+        logger.info(f"[검색] 최종 기사수: {len(final_articles_for_template)}")
         return templates.TemplateResponse(
             "index.html",
             {
                 "request": request,
                 "keyword_input": ', '.join(keyword_list),
-                "final_articles": sorted_articles,
+                "final_articles": final_articles_for_template, # 변환된 리스트 전달
                 "search_mode": search_mode,
+                # "video_only": video_only == "on", # HTML에 없으므로 제거
                 "now": now.strftime('%Y-%m-%d %H:%M:%S'),
                 "msg": msg
             }
@@ -177,17 +221,36 @@ async def post_search(
                 "keyword_input": ', '.join(keyword_list),
                 "final_articles": [],
                 "search_mode": search_mode,
+                # "video_only": video_only == "on", # HTML에 없으므로 제거
                 "now": now.strftime('%Y-%m-%d %H:%M:%S'),
                 "msg": f"오류: {e}"
             }
         )
 
-# --- 네이버미 변환은 아래와 같이 (별도 구현 필요, 여긴 더미) ---
-@app.post("/naverme", response_class=HTMLResponse)
+# --- 네이버미 변환 (실제 Playwright 등 구현 필요, 현재는 더미) ---
+@app.post("/naverme", response_class=HTMLResponse) # 경로를 /naverme로 변경
 async def post_naverme(request: Request, selected_urls: str = Form(...)):
     # selected_urls는 JSON 리스트(string)
     import json
     urls = json.loads(selected_urls)
-    # 예시: 네이버미 변환 (실제 Playwright 등 구현 필요)
-    naverme_results = [{"url": u, "naverme": f"https://naver.me/abc123"} for u in urls]
-    return {"results": naverme_results}
+    
+    naverme_results = []
+    for u in urls:
+        # 실제 네이버미 변환 로직 (Playwright 등)이 여기에 들어갑니다.
+        # 현재는 더미 데이터로 응답합니다.
+        # 클라우드 환경에서 Playwright는 리소스 소모 및 봇 감지로 인해 불안정할 수 있습니다.
+        logger.info(f"URL 단축 요청: {u}")
+        naverme_results.append({"original_url": u, "shortened_url": f"https://naver.me/dummy_{hash(u) % 10000}"})
+    
+    # HTML의 JavaScript가 JSON 응답을 기대하므로 JSONResponse를 반환합니다.
+    # HTML에서 alert() 대신 더 나은 UI (예: 모달, 토스트 메시지)를 사용하는 것을 권장합니다.
+    return HTMLResponse(content=json.dumps({"results": naverme_results}), media_type="application/json")
+
+
+# 애플리케이션 실행 (직접 실행 시 uvicorn 서버 시작)
+if __name__ == "__main__":
+    # 환경 변수에서 PORT를 가져오거나 기본값 8000 사용
+    port = int(os.environ.get("PORT", 8000))
+    # app:app은 'app.py' 파일 내의 'app' 객체를 의미합니다.
+    # --reload 옵션은 코드 변경 시 자동으로 서버를 재시작합니다.
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
