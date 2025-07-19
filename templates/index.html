@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>📰 네이버 뉴스검색기</title>
+    <title>📰 네이버 뉴스검색기 + 네이버미 변환</title>
     <style>
         body { font-family:'Malgun Gothic',sans-serif; background:#f9f9f9; margin:40px; }
         form { margin-bottom:20px; }
@@ -13,100 +13,67 @@
         table { width:100%; border-collapse:collapse; margin-top:10px; }
         th, td { border:1px solid #ddd; padding:8px; text-align:left; }
         th { background:#f2f2f2; }
-        textarea { width:100%; height:160px; font-size:1em; padding:8px; border:1px solid #ccc; border-radius:4px; }
+        textarea { width:100%; height:120px; font-size:1em; padding:8px; border:1px solid #ccc; border-radius:4px; }
         hr { margin:24px 0; border:none; border-top:1px solid #eee; }
-        .badge { display:inline-block; background:#eee; border-radius:14px; padding:2px 10px; font-size:0.9em; margin-right:4px;}
     </style>
     <script>
-    function selectAll(on) {
-        let checkboxes = document.querySelectorAll('input[name="selbox"]');
-        checkboxes.forEach(cb => cb.checked = on);
-        makeTextarea();
+    // 전체선택/해제
+    function toggleAll(checked) {
+        let cbs = document.querySelectorAll('input[name="selected_urls"]');
+        cbs.forEach(cb => cb.checked = checked);
+        updateTextarea();
     }
-    function makeTextarea() {
-        let rows = document.querySelectorAll('.row');
-        let arr = [];
-        let selected_urls = [];
-        rows.forEach(r => {
-            if (r.querySelector('input[name="selbox"]').checked) {
-                arr.push(r.dataset.copy);
-                selected_urls.push(r.dataset.url);
+    // textarea 자동 갱신
+    function updateTextarea() {
+        let cbs = document.querySelectorAll('input[name="selected_urls"]:checked');
+        let arts = JSON.parse(document.getElementById("final_articles_json").value);
+        let txts = [];
+        cbs.forEach(cb => {
+            let a = arts.find(x => x.url == cb.value);
+            if (a) {
+                txts.push(`■ ${a.title} (${a.press})\n${a.url}`);
             }
         });
-        document.getElementById('copyarea').value = arr.join('\n\n');
-        document.getElementById('selected_urls').value = JSON.stringify(selected_urls);
+        document.getElementById("copy_area").value = txts.join('\n\n');
     }
     </script>
 </head>
 <body>
-    <h1>📰 네이버 뉴스검색기</h1>
+    <h1>📰 네이버 뉴스검색기 + 네이버미 변환</h1>
     <form method="post" action="/">
         <label>🗂️ 검색 유형:</label>
         <select name="search_mode">
             <option value="전체" {% if search_mode == '전체' %}selected{% endif %}>전체</option>
             <option value="주요언론사만" {% if search_mode == '주요언론사만' %}selected{% endif %}>주요언론사만</option>
         </select>
-        <br><br>
-        <label>🔍 키워드 (쉼표로 구분):</label><br>
-        <input type="text" name="keywords" style="width:400px;" value="{{ keyword_input or '' }}" placeholder="예) 육군, 국방, 외교...">
+        <label style="margin-left:20px;">🔍 키워드 (쉼표로 구분):</label>
+        <input type="text" name="keywords" style="width:400px;" value="{{ keyword_input or '' }}" placeholder="예: 육군, 국방, 외교">
         <button type="submit">🔍 검색</button>
     </form>
 
-    <span style="color:gray;">🕒 현재 시각: {{ now }}</span>
-    {% if msg %}<hr><b>{{ msg }}</b>{% endif %}
+    <div style="color:gray; font-size:13px; margin-bottom:10px;">
+        🕒 현재 시각: {{ now }} (4시간 이내, 2개 이상 키워드 포함 기사만)
+    </div>
+    {% if msg %}
+    <div style="margin: 12px 0; color:#0d57a2;">{{ msg }}</div>
+    {% endif %}
 
     {% if final_articles %}
     <hr>
-    <h2>검색 결과</h2>
-    <button type="button" onclick="selectAll(true)">전체 선택</button>
-    <button type="button" onclick="selectAll(false)">전체 해제</button>
-    <form method="post" action="/naverme" id="navermeForm">
-        <input type="hidden" name="keywords" value="{{ keyword_input }}">
+    <form id="news_form" method="post" action="/naverme">
+        <input type="hidden" name="keyword_input" value="{{ keyword_input }}">
         <input type="hidden" name="search_mode" value="{{ search_mode }}">
-        <input type="hidden" name="selected_urls" id="selected_urls" value="">
+        <input type="hidden" id="final_articles_json" value='{{ final_articles|tojson|safe }}'>
         <table>
             <tr>
-                <th>선택</th>
+                <th><input type="checkbox" onclick="toggleAll(this.checked)">전체</th>
                 <th>제목</th>
                 <th>언론사</th>
-                <th>발행시간</th>
                 <th>키워드</th>
-                <th>URL</th>
+                <th>시간</th>
+                <th>원본</th>
             </tr>
             {% for art in final_articles %}
-            <tr class="row" data-copy="{{ art.copy_text|e }}" data-url="{{ art.url }}">
+            <tr>
                 <td>
-                    <input type="checkbox" name="selbox" checked onchange="makeTextarea()">
-                </td>
-                <td>{{ art.title }}</td>
-                <td>{{ art.press }}</td>
-                <td>{{ art.pubdate_str }}</td>
-                <td>
-                    {% for kw in art.matched_list %}
-                        <span class="badge">{{ kw }}</span>
-                    {% endfor %}
-                </td>
-                <td><a href="{{ art.url }}" target="_blank">기사</a></td>
-            </tr>
-            {% endfor %}
-        </table>
-        <br>
-        <textarea id="copyarea" readonly>
-{% for art in final_articles %}
-{{ art.copy_text }}
-
-{% endfor %}
-        </textarea>
-        <br>
-        <button type="submit" style="background:#06bf37;">🔗 선택 기사 네이버미 변환</button>
-    </form>
-    <script>makeTextarea();</script>
-    {% endif %}
-
-    {% if naverme_results %}
-    <hr>
-    <h3>네이버미 변환 결과</h3>
-    <textarea readonly>{% for res in naverme_results %}{{ res }}{% if not loop.last %}\n{% endif %}{% endfor %}</textarea>
-    {% endif %}
-</body>
-</html>
+                    <input type="checkbox" name="selected_urls" value="{{ art.url
