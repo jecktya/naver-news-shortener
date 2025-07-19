@@ -134,7 +134,19 @@ async def post_search(
         # 네이버 API에 키워드별로 각각 요청
         # display 값을 줄여서 API 호출 부하를 줄이는 것을 고려해볼 수 있습니다.
         # 예: tasks = [search_news_naver(kw, display=10) for kw in keyword_list]
-        tasks = [search_news_naver(kw) for kw in keyword_list]
+        
+        # --- API 호출 동시성 제어 (Semaphore 사용) ---
+        # 한 번에 5개까지만 동시 요청을 보내도록 제한합니다.
+        # 이 값을 필요에 따라 조정하여 테스트해볼 수 있습니다.
+        semaphore = asyncio.Semaphore(5) 
+
+        async def limited_search(kw):
+            async with semaphore:
+                # 각 키워드당 가져오는 기사 수를 30에서 10으로 줄이는 것을 고려합니다.
+                # 이는 API 호출 부하를 줄이는 데 도움이 될 수 있습니다.
+                return await search_news_naver(kw, display=10) 
+
+        tasks = [limited_search(kw) for kw in keyword_list]
         result_lists = await asyncio.gather(*tasks)
 
         # 기사 합치기 & 중복 제거 & 키워드 매칭
