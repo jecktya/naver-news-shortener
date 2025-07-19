@@ -76,4 +76,47 @@
             {% for art in final_articles %}
             <tr>
                 <td>
-                    <input type="checkbox" name="selected_urls" value="{{ art.url
+                    <input type="checkbox" name="selected_urls" value="{{ art.url }}" checked onchange="updateTextarea()">
+                </td>
+                <td>{{ art.title }}</td>
+                <td>{{ art.press }}</td>
+                <td>
+                    {{ art.matched_list | join(', ') }} ({{ art.matched_count }})
+                </td>
+                <td>{{ art.pubdate_str }}</td>
+                <td><a href="{{ art.url }}" target="_blank">기사</a></td>
+            </tr>
+            {% endfor %}
+        </table>
+        <div style="margin-top:12px;">
+            <textarea id="copy_area" readonly onclick="this.select();"></textarea>
+        </div>
+        <button type="submit" style="margin-top:10px;">🔗 선택 기사 네이버미 변환</button>
+    </form>
+    <script>
+        // 첫 로드시 자동 텍스트에리어 반영
+        window.onload = function() { updateTextarea(); }
+    </script>
+    {% endif %}
+
+    {% if naverme_map %}
+        <hr>
+        <h3>네이버me 변환 결과</h3>
+        <ul>
+        {% for url, naverme in naverme_map.items() %}
+            <li>
+                <b><a href="{{ url }}" target="_blank">{{ url }}</a></b>
+                <br>
+                <span>→ <a href="{{ naverme }}" target="_blank">{{ naverme }}</a></span>
+            </li>
+        {% endfor %}
+        </ul>
+    {% endif %}
+
+    {% if msg %}
+        <div style="color: #a00; margin-top: 14px;">{{ msg }}</div>
+    {% endif %}
+
+    <p style="margin-top:30px;"><a href="/">🏠 홈으로 돌아가기</a></p>
+</body>
+</html>
