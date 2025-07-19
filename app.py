@@ -175,10 +175,18 @@ async def post_search(
             # 시간 필터: 4시간 이내만
             if not v["pubdate"] or (now - v["pubdate"] > timedelta(hours=4)):
                 continue
-            # --- 키워드 필터링 로직 재조정: 2개 이상 키워드 포함 ---
-            if len(v["matched"]) < 2:
-                continue
-            # 주요언론사 필터
+            
+            # --- 키워드 필터링 로직 조건부 적용 ---
+            if search_mode == "주요언론사만":
+                # '주요언론사만' 모드일 때는 1개 이상의 키워드 포함 시 통과
+                if not v["matched"]: # 매칭된 키워드가 없으면 건너뜀 (즉, 1개 이상 매칭 시 통과)
+                    continue
+            else:
+                # '전체' 모드일 때는 2개 이상의 키워드 포함 시 통과 (기존 로직 유지)
+                if len(v["matched"]) < 2:
+                    continue
+
+            # 주요언론사 필터 (이전과 동일)
             if search_mode == "주요언론사만" and v["press"] not in PRESS_MAJOR:
                 continue
             
@@ -198,7 +206,12 @@ async def post_search(
             final_articles_for_template.append(art_copy)
 
 
-        msg = f"검색 결과: {len(final_articles_for_template)}건 (4시간 이내, 2개 이상 키워드 포함)" # 메시지 업데이트
+        # 메시지 업데이트: 필터링 조건에 따라 다르게 표시
+        if search_mode == "주요언론사만":
+            msg = f"검색 결과: {len(final_articles_for_template)}건 (4시간 이내, 1개 이상 키워드 포함, 주요언론사만)"
+        else:
+            msg = f"검색 결과: {len(final_articles_for_template)}건 (4시간 이내, 2개 이상 키워드 포함)"
+            
         logger.info(f"[검색] 최종 기사수: {len(final_articles_for_template)}")
         return templates.TemplateResponse(
             "index.html",
