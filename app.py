@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse
 import httpx
 
 # --- 로깅 설정 ---
+# 기본 로깅 레벨을 INFO로 설정하여 DEBUG 메시지는 출력되지 않도록 합니다.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__) # 특정 로거 사용
 
@@ -72,7 +73,8 @@ async def search_news_naver(keyword, display=10, max_retries=3): # display 기�
     for attempt in range(max_retries):
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                logger.info(f"[API 호출] 시도 {attempt + 1}/{max_retries} | 쿼리: '{keyword}'")
+                # 이 로그 메시지를 INFO에서 DEBUG로 변경하여 기본적으로 출력되지 않도록 합니다.
+                logger.debug(f"[API 호출] 시도 {attempt + 1}/{max_retries} | 쿼리: '{keyword}'")
                 res = await client.get(NAVER_NEWS_API_URL, headers=headers, params=params)
                 res.raise_for_status() # 200 OK가 아니면 예외 발생 (429 포함)
                 return res.json().get("items", [])
@@ -108,7 +110,6 @@ async def get_index(request: Request):
             "keyword_input": ', '.join(DEFAULT_KEYWORDS),
             "final_articles": [],
             "search_mode": "전체",
-            # "video_only": False, # HTML에 없으므로 제거
             "now": now.strftime('%Y-%m-%d %H:%M:%S'),
             "msg": None
         }
@@ -119,7 +120,6 @@ async def post_search(
     request: Request,
     keywords: str = Form(""),
     search_mode: str = Form("전체"),
-    # video_only: str = Form(""), # HTML에 없으므로 제거
 ):
     now = datetime.now(timezone(timedelta(hours=9)))
     # 키워드 전처리
@@ -127,7 +127,7 @@ async def post_search(
     if not keyword_list:
         keyword_list = DEFAULT_KEYWORDS
 
-    logger.info(f"[검색] POST | 키워드={keywords} | 검색모드={search_mode}") # video_only 로그 제거
+    logger.info(f"[검색] POST | 키워드={keywords} | 검색모드={search_mode}")
 
     url_map = dict()
     try:
@@ -171,19 +171,15 @@ async def post_search(
             # 시간 필터: 4시간 이내만
             if not v["pubdate"] or (now - v["pubdate"] > timedelta(hours=4)):
                 continue
-            # 2개 이상 키워드 포함 필터 (기존 로직 유지)
+            # --- 키워드 필터링 로직 수정: 2개 이상 키워드 포함 ---
+            # 이전 코드: if not all(k in v["matched"] for k in keyword_list): continue (모든 키워드 포함)
+            # 변경: if len(v["matched"]) < 2: continue (최소 2개 키워드 포함)
             if len(v["matched"]) < 2:
                 continue
             # 주요언론사 필터
             if search_mode == "주요언론사만" and v["press"] not in PRESS_MAJOR:
                 continue
-            # video_only 필터링 로직 제거 (HTML에 없으므로)
-            # if search_mode == "동영상만":
-            #     video_keys = ["영상", "동영상", "영상보기", "보러가기", "뉴스영상", "영상뉴스", "클릭하세요", "바로보기"]
-            #     if v["press"] not in PRESS_MAJOR:
-            #         continue
-            #     if not (any(k in v["desc"] for k in video_keys) or any(k in v["title"] for k in video_keys)):
-            #         continue
+            
             articles.append(v)
 
         # 정렬: 시간순 (datetime 객체로 정렬)
@@ -195,6 +191,8 @@ async def post_search(
             art_copy = art.copy()
             art_copy["pubdate"] = art_copy["pubdate"].strftime('%Y-%m-%d %H:%M') if art_copy["pubdate"] else ""
             art_copy["matched"] = sorted(list(art_copy["matched"]), key=lambda x: x) # set을 list로 변환
+            art_copy["matched_list"] = art_copy["matched"] # Jinja2에서 사용하기 위해 추가
+            art_copy["matched_count"] = len(art_copy["matched"]) # Jinja2에서 사용하기 위해 추가
             final_articles_for_template.append(art_copy)
 
 
@@ -207,7 +205,6 @@ async def post_search(
                 "keyword_input": ', '.join(keyword_list),
                 "final_articles": final_articles_for_template, # 변환된 리스트 전달
                 "search_mode": search_mode,
-                # "video_only": video_only == "on", # HTML에 없으므로 제거
                 "now": now.strftime('%Y-%m-%d %H:%M:%S'),
                 "msg": msg
             }
@@ -221,7 +218,6 @@ async def post_search(
                 "keyword_input": ', '.join(keyword_list),
                 "final_articles": [],
                 "search_mode": search_mode,
-                # "video_only": video_only == "on", # HTML에 없으므로 제거
                 "now": now.strftime('%Y-%m-%d %H:%M:%S'),
                 "msg": f"오류: {e}"
             }
