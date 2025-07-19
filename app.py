@@ -59,7 +59,7 @@ def clean_html_tags(text):
     unescaped_text = html.unescape(cleaned_text) # HTML 엔티티 디코딩
     return unescaped_text
 
-async def search_news_naver(keyword, display=10, max_retries=3): # display 기본값 10으로 유지
+async def search_news_naver(keyword, display=20, max_retries=3): # display 기본값 20으로 변경
     """
     네이버 뉴스 API를 호출하여 뉴스 아이템을 가져옵니다.
     429 Too Many Requests 에러 발생 시 재시도 로직을 포함합니다.
@@ -141,8 +141,8 @@ async def post_search(
 
         async def limited_search(kw):
             async with semaphore:
-                # 각 키워드당 가져오는 기사 수를 10으로 설정합니다.
-                return await search_news_naver(kw, display=10) 
+                # 각 키워드당 가져오는 기사 수를 20으로 설정합니다. (display 값 변경)
+                return await search_news_naver(kw, display=20) 
 
         tasks = [limited_search(kw) for kw in keyword_list]
         result_lists = await asyncio.gather(*tasks)
@@ -175,9 +175,8 @@ async def post_search(
             # 시간 필터: 4시간 이내만
             if not v["pubdate"] or (now - v["pubdate"] > timedelta(hours=4)):
                 continue
-            # --- 키워드 필터링 로직 수정: 1개 이상 키워드 포함 ---
-            # 변경: if not v["matched"]: continue (최소 1개 키워드 포함)
-            if not v["matched"]: # 매칭된 키워드가 없으면 건너뜀 (즉, 1개 이상 매칭 시 통과)
+            # --- 키워드 필터링 로직 재조정: 2개 이상 키워드 포함 ---
+            if len(v["matched"]) < 2:
                 continue
             # 주요언론사 필터
             if search_mode == "주요언론사만" and v["press"] not in PRESS_MAJOR:
@@ -199,7 +198,7 @@ async def post_search(
             final_articles_for_template.append(art_copy)
 
 
-        msg = f"검색 결과: {len(final_articles_for_template)}건 (4시간 이내, 1개 이상 키워드 포함)" # 메시지 업데이트
+        msg = f"검색 결과: {len(final_articles_for_template)}건 (4시간 이내, 2개 이상 키워드 포함)" # 메시지 업데이트
         logger.info(f"[검색] 최종 기사수: {len(final_articles_for_template)}")
         return templates.TemplateResponse(
             "index.html",
