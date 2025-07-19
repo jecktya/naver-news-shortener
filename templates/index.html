@@ -4,74 +4,100 @@
     <meta charset="UTF-8">
     <title>📰 네이버 뉴스검색기</title>
     <style>
-        body { font-family: 'Malgun Gothic', sans-serif; background: #f9f9f9; margin: 40px; }
-        h1 { color: #333; }
-        .msg { color: #555; margin-bottom: 12px; font-size: 1.06em; }
-        .now { color: #888; font-size: 0.97em; }
-        table { width: 100%; border-collapse: collapse; margin-top: 18px; }
-        th, td { border: 1px solid #ddd; padding: 8px; font-size: 1em; }
-        th { background: #f2f2f2; }
-        .matched-key { color: #0052cc; font-weight: bold; }
-        .matched-count { color: #f04848; font-weight: bold; }
-        .press-major { color: #1a8917; font-weight: bold; }
-        .desc { color: #666; font-size: 0.98em; }
+        body { font-family:'Malgun Gothic',sans-serif; background:#f9f9f9; margin:40px; }
+        form { margin-bottom:20px; }
+        label, select, input[type=text], button { font-size:1em; }
+        select, input[type=text] { padding:6px; border:1px solid #ccc; border-radius:4px; }
+        button { padding:6px 12px; margin-left:8px; background:#4287f5; color:#fff; border:none; border-radius:4px; cursor:pointer; }
+        button:hover { opacity:0.9; }
+        table { width:100%; border-collapse:collapse; margin-top:10px; }
+        th, td { border:1px solid #ddd; padding:8px; text-align:left; }
+        th { background:#f2f2f2; }
+        textarea { width:100%; height:160px; font-size:1em; padding:8px; border:1px solid #ccc; border-radius:4px; }
+        hr { margin:24px 0; border:none; border-top:1px solid #eee; }
+        .badge { display:inline-block; background:#eee; border-radius:14px; padding:2px 10px; font-size:0.9em; margin-right:4px;}
     </style>
+    <script>
+    function selectAll(on) {
+        let checkboxes = document.querySelectorAll('input[name="selbox"]');
+        checkboxes.forEach(cb => cb.checked = on);
+        makeTextarea();
+    }
+    function makeTextarea() {
+        let rows = document.querySelectorAll('.row');
+        let arr = [];
+        rows.forEach(r => {
+            if (r.querySelector('input[name="selbox"]').checked) {
+                arr.push(r.dataset.copy);
+            }
+        });
+        document.getElementById('copyarea').value = arr.join('\n\n');
+    }
+    </script>
 </head>
 <body>
     <h1>📰 네이버 뉴스검색기</h1>
     <form method="post" action="/">
-        <label>검색 유형:</label>
+        <label>🗂️ 검색 유형:</label>
         <select name="search_mode">
             <option value="전체" {% if search_mode == '전체' %}selected{% endif %}>전체</option>
             <option value="주요언론사만" {% if search_mode == '주요언론사만' %}selected{% endif %}>주요언론사만</option>
             <option value="동영상만" {% if search_mode == '동영상만' %}selected{% endif %}>동영상만</option>
         </select>
-        &nbsp;&nbsp;
-        <label>키워드(쉼표로 구분):</label>
-        <input type="text" name="keywords" style="width:400px;" value="{{ keyword_input or '' }}" placeholder="육군, 국방, 외교, ...">
+        <label style="margin-left:20px;">
+            <input type="checkbox" name="video_only" value="on" {% if video_only %}checked{% endif %}> 동영상만
+        </label>
+        <br><br>
+        <label>🔍 키워드 (쉼표로 구분):</label><br>
+        <input type="text" name="keywords" style="width:400px;" value="{{ keyword_input or '' }}" placeholder="예) 육군, 국방, 외교...">
         <button type="submit">🔍 검색</button>
-        <span class="now">🕒 현재시각: {{ now }}</span>
     </form>
 
-    {% if msg %}
-        <div class="msg">{{ msg }}</div>
-    {% endif %}
+    <span style="color:gray;">🕒 현재 시각: {{ now }}</span>
+    {% if msg %}<hr><b>{{ msg }}</b>{% endif %}
 
     {% if final_articles %}
-        <table>
-            <tr>
-                <th>제목</th>
-                <th>언론사</th>
-                <th>시간</th>
-                <th>키워드</th>
-                <th>원본</th>
-            </tr>
-            {% for art in final_articles %}
-            <tr>
-                <td>
-                    <div>{{ art.title }}</div>
-                    <div class="desc">{{ art.desc }}</div>
-                </td>
-                <td>
-                    {% if art.press in ["조선일보", "연합뉴스", "한겨레", "중앙일보", "MBN", "KBS", "SBS", "YTN", "동아일보", "세계일보", "문화일보", "뉴시스", "네이버", "다음", "국민일보", "국방일보", "이데일리", "뉴스1", "JTBC"] %}
-                        <span class="press-major">{{ art.press }}</span>
-                    {% else %}
-                        {{ art.press }}
-                    {% endif %}
-                </td>
-                <td>{{ art.pubdate_str }}</td>
-                <td>
-                    {% for k in art.matched_list %}
-                        <span class="matched-key">{{ k }}</span>{% if not loop.last %}, {% endif %}
-                    {% endfor %}
-                    <span class="matched-count">({{ art.matched_count }})</span>
-                </td>
-                <td>
-                    <a href="{{ art.url }}" target="_blank">바로가기</a>
-                </td>
-            </tr>
-            {% endfor %}
-        </table>
+    <hr>
+    <h2>검색 결과</h2>
+    <button type="button" onclick="selectAll(true)">전체 선택</button>
+    <button type="button" onclick="selectAll(false)">전체 해제</button>
+    <table>
+        <tr>
+            <th>선택</th>
+            <th>제목</th>
+            <th>언론사</th>
+            <th>발행시간</th>
+            <th>키워드</th>
+            <th>URL</th>
+        </tr>
+        {% for art in final_articles %}
+        <tr class="row" data-copy="{{ art.copy_text|e }}">
+            <td>
+                <input type="checkbox" name="selbox" checked onchange="makeTextarea()">
+            </td>
+            <td>{{ art.title }}</td>
+            <td>{{ art.press }}</td>
+            <td>{{ art.pubdate_str }}</td>
+            <td>
+                {% for kw in art.matched_list %}
+                    <span class="badge">{{ kw }}</span>
+                {% endfor %}
+                {% if art.matched_count > 1 %}
+                    <span style="color:gray;">({{ art.matched_count }})</span>
+                {% endif %}
+            </td>
+            <td><a href="{{ art.url }}" target="_blank">기사</a></td>
+        </tr>
+        {% endfor %}
+    </table>
+    <br>
+    <textarea id="copyarea" readonly>
+{% for art in final_articles %}
+{{ art.copy_text }}
+
+{% endfor %}
+    </textarea>
     {% endif %}
+    <script>makeTextarea();</script>
 </body>
 </html>
