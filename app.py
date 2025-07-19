@@ -5,7 +5,8 @@ import re
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from email.utils import parsedate_to_datetime # email.utils.parsedate_to_datetime 임포트 추가
+from email.utils import parsedate_to_datetime
+import html # html 모듈 임포트 추가
 
 from fastapi import FastAPI, Request, Form, status
 from fastapi.templating import Jinja2Templates
@@ -53,7 +54,10 @@ def parse_pubdate(pubdate_str):
         return None
 
 def clean_html_tags(text):
-    return re.sub(r'<[^>]+>', '', text or "")
+    # HTML 태그를 제거하고, 그 후 HTML 엔티티를 디코딩합니다.
+    cleaned_text = re.sub(r'<[^>]+>', '', text or "")
+    unescaped_text = html.unescape(cleaned_text) # HTML 엔티티 디코딩
+    return unescaped_text
 
 async def search_news_naver(keyword, display=10, max_retries=3): # display 기본값 10으로 유지
     """
